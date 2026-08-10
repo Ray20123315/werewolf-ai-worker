@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 globalThis.localStorage = { getItem() { return null; }, setItem() {} };
 if (!globalThis.navigator) Object.defineProperty(globalThis, "navigator", { value: { language: "zh-TW" }, configurable: true });
-const { knownText, normalizeLocale } = await import("../public/i18n.js");
+const { displayText, ensureTranslations, knownText, normalizeLocale, translationFailure } = await import("../public/i18n.js");
 
 test("UI dictionary has distinct Traditional Simplified and English product labels", () => {
   assert.equal(knownText("狼人殺", "zh-TW"), "狼人殺");
@@ -39,8 +39,10 @@ test("page exposes three-language UI, automatic role setup, and multi-key AI BYO
   assert.match(app, /type: "configure_settings", settings: \{ autoRoleSetup:/);
   assert.match(app, /parseApiKeyPool/);
   assert.match(app, /apiKeys: keys/);
-  assert.match(app, /type: "chat", content, locale: getLocale\(\)/);
-  assert.match(app, /type: "debate_speech", content, locale: getLocale\(\)/);
+  assert.match(app, /type: "chat", content \}/);
+  assert.match(app, /type: "debate_speech", content \}/);
+  assert.doesNotMatch(app, /type: "chat", content, locale: getLocale\(\)/);
+  assert.doesNotMatch(app, /type: "debate_speech", content, locale: getLocale\(\)/);
   assert.match(app, /\/translate`/);
 });
 
@@ -72,8 +74,9 @@ test("room state preserves original player text plus source locale instead of pe
   assert.match(types, /sourceLocale\?: AppLocale/);
   assert.match(types, /type: "chat"; content: string; locale\?: AppLocale/);
   assert.match(types, /type: "debate_speech"; content: string; locale\?: AppLocale/);
-  assert.match(room, /this\.chatMessage\(state, actor, this\.normalizeChat\(content\), this\.normalizeMessageLocale\(locale\)\)/);
-  assert.match(room, /this\.recordDebateSpeech\(state, actor, this\.normalizeSpeech\(content\), this\.normalizeMessageLocale\(locale\)\)/);
+  assert.match(room, /this\.chatMessage\(state, actor, this\.normalizeChat\(content\)\)/);
+  assert.match(room, /this\.recordDebateSpeech\(state, actor, this\.normalizeSpeech\(content\)\)/);
+  assert.match(room, /recordDebateSpeech\(state, current, decision\.message, "zh-TW"\)/);
 });
 
 test("automatic role setup is server-authoritative and blocks manual role edits while enabled", () => {
@@ -101,3 +104,44 @@ test("dynamic DOM translations read back from the same zh-TW cache key used for 
   assert.doesNotMatch(i18n, /displayText\(item\.source, "auto", locale\)/);
   assert.match(i18n, /displayText\(item\.source, "zh-TW", locale\)/);
 });
+
+test("human chat and speech always use translation auto-detection, including legacy locale-tagged messages", () => {
+  const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /m\.kind === "chat" \|\| m\.kind === "speech" \? "auto"/);
+  assert.match(app, /translationFailure\(m\.content, sourceLocale\)/);
+});
+
+test("translation failures are visible and retryable instead of permanently cached as success", async () => {
+  const result = await ensureTranslations(["你好"], "auto", async () => { throw new Error("Google 翻譯尚未設定 API Key"); }, "en");
+  assert.equal(result.ok, false);
+  assert.equal(displayText("你好", "auto", "en"), "你好");
+  assert.match(translationFailure("你好", "auto", "en"), /尚未設定/);
+});
+
+test("admin backend uses a registry DO, secret bearer auth, and room moderator role without exposing host controls", () => {
+  const index = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+  const admin = readFileSync(new URL("../src/admin.ts", import.meta.url), "utf8");
+  const room = readFileSync(new URL("../src/room.ts", import.meta.url), "utf8");
+  const directory = readFileSync(new URL("../src/room-directory.ts", import.meta.url), "utf8");
+  const types = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");
+  const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+  const adminHtml = readFileSync(new URL("../public/admin.html", import.meta.url), "utf8");
+  const adminJs = readFileSync(new URL("../public/admin.js", import.meta.url), "utf8");
+  assert.match(index, /ADMIN_PANEL_TOKENS/);
+  assert.match(index, /isAdminRequest/);
+  assert.match(admin, /authorization/);
+  assert.match(index, /\/api\/admin\/rooms/);
+  assert.match(directory, /CREATE TABLE IF NOT EXISTS rooms/);
+  assert.match(directory, /CREATE TABLE IF NOT EXISTS errors/);
+  assert.match(wrangler, /"ROOM_DIRECTORY"/);
+  assert.match(wrangler, /"new_sqlite_classes": \["RoomDirectory"\]/);
+  assert.match(types, /moderatorIds: string\[\]/);
+  assert.match(types, /isModerator: boolean/);
+  assert.match(types, /type: "set_moderator"/);
+  assert.match(room, /只有房主或房間管理員可以踢出玩家/);
+  assert.match(room, /this\.assertHost\(state, token\)/);
+  assert.match(adminHtml, /id="adminLoginForm"/);
+  assert.match(adminJs, /sessionStorage\.setItem\(TOKEN_KEY/);
+  assert.doesNotMatch(adminJs, /localStorage\.setItem\(TOKEN_KEY/);
+});
+

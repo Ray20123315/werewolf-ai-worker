@@ -6,7 +6,8 @@ import {
   knownText,
   localizeDom,
   setLocale,
-  siteTitle
+  siteTitle,
+  translationFailure
 } from "./i18n.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -167,7 +168,7 @@ $("#chatForm").addEventListener("submit", (event) => {
   const input = $("#chatInput");
   const content = input.value.trim();
   if (!content) return;
-  send({ type: "chat", content, locale: getLocale() });
+  send({ type: "chat", content });
   input.value = "";
 });
 
@@ -317,18 +318,26 @@ function renderPlayers() {
     const tags = [];
     if (p.isHost) tags.push('<span class="pill host">房主</span>');
     if (p.isSheriff) tags.push('<span class="pill sheriff">警長</span>');
+    if (p.isModerator) tags.push('<span class="pill host">管理員</span>');
     if (p.isAI) tags.push('<span class="pill ai">AI</span>');
     if (p.isSpectator) tags.push('<span class="pill spectator">觀戰</span>');
     if (!p.alive && !p.isSpectator) tags.push('<span class="pill dead">出局</span>');
     if (teammateIds.has(p.id)) tags.push('<span class="pill wolf">狼隊友</span>');
     if (state.phase === "debate" && state.currentSpeakerId === p.id) tags.push('<span class="pill speaker">發言中</span>');
     const reveal = p.role ? `<small class="role-reveal">${escapeHtml(roleName(p.role))}</small>` : "";
-    const kick = state.me.isHost && p.id !== state.me.id ? `<button class="kick-button" data-kick="${p.id}" type="button">踢出</button>` : "";
-    return `<article class="player-row ${!p.alive ? "is-dead" : ""}"><div><div class="player-name"><strong data-no-translate>${escapeHtml(p.name)}</strong>${tags.join("")}</div>${reveal}</div>${kick}</article>`;
+    const canKick = (state.me.isHost || state.me.isModerator) && p.id !== state.me.id && !p.isHost && (state.me.isHost || !p.isModerator);
+    const kick = canKick ? `<button class="kick-button" data-kick="${p.id}" type="button">踢出</button>` : "";
+    const moderator = state.me.isHost && p.id !== state.me.id && !p.isHost && !p.isAI
+      ? `<button class="kick-button" data-moderator="${p.id}" data-enabled="${p.isModerator ? "false" : "true"}" type="button">${p.isModerator ? "取消管理員" : "設為管理員"}</button>`
+      : "";
+    return `<article class="player-row ${!p.alive ? "is-dead" : ""}"><div><div class="player-name"><strong data-no-translate>${escapeHtml(p.name)}</strong>${tags.join("")}</div>${reveal}</div><div class="player-actions">${moderator}${kick}</div></article>`;
   }).join("");
   document.querySelectorAll("[data-kick]").forEach((button) => button.addEventListener("click", async () => {
     const prompt = await localizedRuntime(`確定踢出 ${nameOf(button.dataset.kick)}？被踢者不是永久封鎖，可重新加入。`);
     if (confirm(prompt)) send({ type: "kick", targetId: button.dataset.kick });
+  }));
+  document.querySelectorAll("[data-moderator]").forEach((button) => button.addEventListener("click", () => {
+    send({ type: "set_moderator", targetId: button.dataset.moderator, enabled: button.dataset.enabled === "true" });
   }));
 }
 
@@ -336,9 +345,12 @@ function renderMessages() {
   const box = $("#messages");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   const pendingBySource = new Map();
+  let hasTranslationFailure = false;
   box.innerHTML = state.messages.map((m) => {
-    const sourceLocale = m.sourceLocale || "zh-TW";
+    const sourceLocale = m.kind === "chat" || m.kind === "speech" ? "auto" : (m.sourceLocale || "zh-TW");
     let content = displayText(m.content, sourceLocale);
+    const failure = translationFailure(m.content, sourceLocale);
+    if (failure) hasTranslationFailure = true;
     if (content === null) {
       content = knownText("翻譯中…");
       const list = pendingBySource.get(sourceLocale) || [];
@@ -346,11 +358,18 @@ function renderMessages() {
       pendingBySource.set(sourceLocale, list);
     }
     const shownName = m.kind === "system" ? knownText("系統") : m.playerName;
-    return `<article class="message message-${m.kind}" data-no-translate><div class="message-head"><strong>${escapeHtml(shownName)}</strong><span>${formatTime(m.createdAt)}</span></div><p class="message-content" title="${escapeAttr(content)}">${escapeHtml(content)}</p></article>`;
+    const warning = failure ? `<span class="translation-warning" title="${escapeAttr(failure)}">${escapeHtml(knownText("翻譯失敗"))}</span>` : "";
+    return `<article class="message message-${m.kind}" data-no-translate><div class="message-head"><strong>${escapeHtml(shownName)}</strong><span>${formatTime(m.createdAt)}</span>${warning}</div><p class="message-content" title="${escapeAttr(content)}">${escapeHtml(content)}</p></article>`;
   }).join("");
+  const translationStatus = $("#translationStatus");
+  if (translationStatus) {
+    translationStatus.textContent = hasTranslationFailure ? knownText("翻譯暫時無法使用，已顯示原文。") : "";
+    translationStatus.classList.toggle("hidden", !hasTranslationFailure);
+  }
   if (atBottom) box.scrollTop = box.scrollHeight;
   for (const [sourceLocale, texts] of pendingBySource) {
-    void ensureTranslations(texts, sourceLocale, translateBatchRemote).then(() => {
+    void ensureTranslations(texts, sourceLocale, translateBatchRemote).then((result) => {
+      if (!result?.ok) showTranslationProblem(result?.error);
       if (state) renderMessages();
     });
   }
@@ -464,7 +483,7 @@ function renderDebateAction(area) {
   $("#submitSpeech")?.addEventListener("click", () => {
     const content = $("#debateSpeech").value.trim();
     if (content.length < 2) return showToast("正式發言至少 2 個字元", true);
-    send({ type: "debate_speech", content, locale: getLocale() });
+    send({ type: "debate_speech", content });
   });
   bindGenericRoleAction();
 }
@@ -634,6 +653,7 @@ function renderNotice() {
   const notices = [];
   if (state.roleSetupError && state.me.isHost) notices.push(state.roleSetupError);
   if (state.me.isSpectator) notices.push("你是觀戰者：這局不能取得新角色，下一局才轉正式玩家。 ");
+  if (state.me.isModerator && !state.me.isHost) notices.push("你是房間管理員：可處理房內秩序，但不能修改房規或開始／重開遊戲。");
   if (state.phase === "night") notices.push("夜晚公開聊天室已暫停，避免資訊洩漏。 ");
   $("#noticePanel").textContent = notices.join("　");
   $("#noticePanel").classList.toggle("hidden", notices.length === 0);
@@ -652,7 +672,7 @@ function alivePlayers() { return formalPlayers().filter((p) => p.alive); }
 function roleName(id) { return roleById.get(id)?.name || id; }
 function nameOf(id) { return state?.players.find((p) => p.id === id)?.name || "未知玩家"; }
 function optionFor(id) { return `<option value="${escapeAttr(id)}" data-no-translate>${escapeHtml(nameOf(id))}</option>`; }
-function tieRuleLabel(rule) { return ({ no_elimination: "平票無人出局", revote: "全場重投", pk_revote: "平票玩家 PK 後重投" })[rule] || rule; }
+function tieRuleLabel(rule) { return ({ no_elimination: "平票無人出局", revote: "全場重投", pk_revote: "平票玩家 PK 後重投", random_elimination: "平票隨機淘汰 1 人" })[rule] || rule; }
 function optionLabel(value) { return ({ heal: "解藥", poison: "毒藥", pass: "跳過", nullify: "使技能失效", freeze: "凍結", detonate: "引爆凍結", day: "白陽祝福", night: "夜陰祝福", block: "封鎖技能", substitute: "死亡替換", village: "支持好人", werewolf: "支持狼人", spirit: "支持怨靈" })[value] || value; }
 
 async function translateBatchRemote(texts, sourceLocale, targetLocale) {
@@ -745,6 +765,14 @@ function showToast(message, isError = false, sourceLocale = "zh-TW") {
       if (toast.dataset.sourceMessage === raw) toast.textContent = displayText(raw, sourceLocale) || raw;
     });
   }
+}
+function showTranslationProblem(message) {
+  const text = String(message || "翻譯暫時無法使用，已顯示原文。");
+  const now = Date.now();
+  if (showTranslationProblem.lastMessage === text && now - (showTranslationProblem.lastAt || 0) < 10_000) return;
+  showTranslationProblem.lastMessage = text;
+  showTranslationProblem.lastAt = now;
+  showToast(text, true);
 }
 function showError(error) { showToast(error instanceof Error ? error.message : String(error), true); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]); }

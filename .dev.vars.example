@@ -6,3 +6,8 @@
 # For local development only, copy this file to .dev.vars and set real keys there (never commit .dev.vars):
 # GOOGLE_TRANSLATE_API_KEYS=google-key-1,google-key-2
 # Production should use: npx wrangler secret put GOOGLE_TRANSLATE_API_KEYS
+
+# Global admin backend (/admin). Use a long random token (24+ characters).
+# Multiple admin tokens are supported, separated by comma/newline/semicolon.
+# ADMIN_PANEL_TOKENS=replace-with-a-long-random-admin-token
+# Production should use: npx wrangler secret put ADMIN_PANEL_TOKENS

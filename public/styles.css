@@ -179,3 +179,9 @@ input:focus, select:focus, textarea:focus { border-color: #b96c64; box-shadow: 0
   .hero h1 { font-size: 43px; }.hero-facts strong { font-size: 26px; }.form-card, .compact-card, .gate-card, .action-card, .chat-card, .players-card, .host-card { padding: 18px; }
   .room-code-row strong { font-size: 21px; }.chat-form { grid-template-columns: 1fr; }.role-card { grid-template-columns: 1fr 56px; }
 }
+
+/* Shared moderation / translation status helpers */
+.player-actions { display: flex; gap: .35rem; flex-wrap: wrap; justify-content: flex-end; }
+.translation-status { margin: 0 0 .55rem; padding: .55rem .7rem; border-radius: 10px; background: rgba(170, 86, 56, .12); font-size: .85rem; }
+.translation-warning { margin-left: .5rem; font-size: .7rem; font-weight: 700; opacity: .72; }
+.admin-link { text-decoration: none; }

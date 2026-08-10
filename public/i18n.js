@@ -45,6 +45,38 @@ const UI = {
   "房內人物": { "zh-TW": "房內人物", "zh-CN": "房内人物", en: "Players in room" },
   "HOST": { "zh-TW": "房主", "zh-CN": "房主", en: "HOST" },
   "房主管理": { "zh-TW": "房主管理", "zh-CN": "房主管理", en: "Host controls" },
+  "管理後台": { "zh-TW": "管理後台", "zh-CN": "管理后台", en: "Admin" },
+  "管理員": { "zh-TW": "管理員", "zh-CN": "管理员", en: "Moderator" },
+  "設為管理員": { "zh-TW": "設為管理員", "zh-CN": "设为管理员", en: "Make moderator" },
+  "取消管理員": { "zh-TW": "取消管理員", "zh-CN": "取消管理员", en: "Remove moderator" },
+  "你是房間管理員：可處理房內秩序，但不能修改房規或開始／重開遊戲。": { "zh-TW": "你是房間管理員：可處理房內秩序，但不能修改房規或開始／重開遊戲。", "zh-CN": "你是房间管理员：可处理房内秩序，但不能修改房规或开始／重开游戏。", en: "You are a room moderator: you can moderate players, but cannot change game rules or start/reset the game." },
+  "翻譯失敗": { "zh-TW": "翻譯失敗", "zh-CN": "翻译失败", en: "Translation failed" },
+  "翻譯暫時無法使用，已顯示原文。": { "zh-TW": "翻譯暫時無法使用，已顯示原文。", "zh-CN": "翻译暂时无法使用，已显示原文。", en: "Translation is temporarily unavailable; showing the original text." },
+  "後台登入": { "zh-TW": "後台登入", "zh-CN": "后台登录", en: "Admin login" },
+  "管理員 Token": { "zh-TW": "管理員 Token", "zh-CN": "管理员 Token", en: "Admin token" },
+  "登入後台": { "zh-TW": "登入後台", "zh-CN": "登录后台", en: "Sign in" },
+  "登出後台": { "zh-TW": "登出後台", "zh-CN": "退出后台", en: "Sign out" },
+  "重新整理": { "zh-TW": "重新整理", "zh-CN": "刷新", en: "Refresh" },
+  "總房間數": { "zh-TW": "總房間數", "zh-CN": "总房间数", en: "Tracked rooms" },
+  "已追蹤房間": { "zh-TW": "已追蹤房間", "zh-CN": "已追踪房间", en: "Tracked rooms" },
+  "首次追蹤": { "zh-TW": "首次追蹤", "zh-CN": "首次追踪", en: "First tracked" },
+  "最近錯誤": { "zh-TW": "最近錯誤", "zh-CN": "最近错误", en: "Recent errors" },
+  "Google 翻譯": { "zh-TW": "Google 翻譯", "zh-CN": "Google 翻译", en: "Google Translation" },
+  "已設定": { "zh-TW": "已設定", "zh-CN": "已设置", en: "Configured" },
+  "未設定": { "zh-TW": "未設定", "zh-CN": "未设置", en: "Not configured" },
+  "所有房間": { "zh-TW": "所有房間", "zh-CN": "所有房间", en: "All rooms" },
+  "最後活動": { "zh-TW": "最後活動", "zh-CN": "最后活动", en: "Last activity" },
+  "連線": { "zh-TW": "連線", "zh-CN": "连接", en: "Connections" },
+  "訊息": { "zh-TW": "訊息", "zh-CN": "消息", en: "Messages" },
+  "查看": { "zh-TW": "查看", "zh-CN": "查看", en: "View" },
+  "房間詳情": { "zh-TW": "房間詳情", "zh-CN": "房间详情", en: "Room details" },
+  "註冊既有房間": { "zh-TW": "註冊既有房間", "zh-CN": "登记已有房间", en: "Track existing room" },
+  "加入追蹤": { "zh-TW": "加入追蹤", "zh-CN": "加入追踪", en: "Add to tracking" },
+  "系統公告": { "zh-TW": "系統公告", "zh-CN": "系统公告", en: "System notice" },
+  "發送公告": { "zh-TW": "發送公告", "zh-CN": "发送公告", en: "Send notice" },
+  "錯誤分類": { "zh-TW": "錯誤分類", "zh-CN": "错误分类", en: "Category" },
+  "來源": { "zh-TW": "來源", "zh-CN": "来源", en: "Source" },
+  "時間": { "zh-TW": "時間", "zh-CN": "时间", en: "Time" },
   "遊戲房規": { "zh-TW": "遊戲房規", "zh-CN": "游戏房规", en: "Game rules" },
   "啟用警長選舉": { "zh-TW": "啟用警長選舉", "zh-CN": "启用警长选举", en: "Enable sheriff election" },
   "死亡資訊": { "zh-TW": "死亡資訊", "zh-CN": "死亡信息", en: "Death information" },
@@ -154,7 +186,9 @@ const UI = {
 const nodeSources = new WeakMap();
 const attrSources = new WeakMap();
 const dynamicCache = new Map();
+const translationFailures = new Map();
 const inFlight = new Map();
+const TRANSLATION_FAILURE_TTL_MS = 30_000;
 let locale = normalizeLocale(localStorage.getItem(LOCALE_KEY) || navigator.language || "zh-TW");
 
 export function normalizeLocale(value) {
@@ -186,23 +220,47 @@ export function displayText(source, sourceLocale = "zh-TW", targetLocale = local
   const text = String(source ?? "");
   if (!text || targetLocale === sourceLocale) return text;
   if (sourceLocale === "zh-TW" && UI[text]?.[targetLocale]) return UI[text][targetLocale];
-  return dynamicCache.get(cacheKey(text, sourceLocale, targetLocale)) ?? null;
+  const key = cacheKey(text, sourceLocale, targetLocale);
+  const cached = dynamicCache.get(key);
+  if (cached !== undefined) return cached;
+  const failure = translationFailures.get(key);
+  if (failure && Date.now() - failure.at < TRANSLATION_FAILURE_TTL_MS) return text;
+  if (failure) translationFailures.delete(key);
+  return null;
+}
+
+export function translationFailure(source, sourceLocale = "auto", targetLocale = locale) {
+  const failure = translationFailures.get(cacheKey(String(source ?? ""), sourceLocale, targetLocale));
+  if (!failure) return null;
+  if (Date.now() - failure.at >= TRANSLATION_FAILURE_TTL_MS) {
+    translationFailures.delete(cacheKey(String(source ?? ""), sourceLocale, targetLocale));
+    return null;
+  }
+  return failure.message;
 }
 
 export async function ensureTranslations(texts, sourceLocale, remoteTranslate, targetLocale = locale) {
   const unique = [...new Set(texts.map((v) => String(v ?? "")).filter(Boolean))];
-  if (!unique.length || !remoteTranslate) return;
+  if (!unique.length || !remoteTranslate) return { ok: true };
   const missing = unique.filter((text) => displayText(text, sourceLocale, targetLocale) === null);
-  if (!missing.length) return;
+  if (!missing.length) return { ok: true };
   const requestKey = `${sourceLocale || "auto"}\u0000${targetLocale}\u0000${missing.join("\u0001")}`;
   if (inFlight.has(requestKey)) return inFlight.get(requestKey);
   const task = (async () => {
     try {
       const translated = await remoteTranslate(missing, sourceLocale, targetLocale);
-      if (!Array.isArray(translated) || translated.length !== missing.length) return;
-      missing.forEach((text, index) => dynamicCache.set(cacheKey(text, sourceLocale, targetLocale), String(translated[index] ?? text)));
-    } catch {
-      missing.forEach((text) => dynamicCache.set(cacheKey(text, sourceLocale, targetLocale), text));
+      if (!Array.isArray(translated) || translated.length !== missing.length) throw new Error("翻譯服務回傳格式錯誤");
+      missing.forEach((text, index) => {
+        const key = cacheKey(text, sourceLocale, targetLocale);
+        dynamicCache.set(key, String(translated[index] ?? text));
+        translationFailures.delete(key);
+      });
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "翻譯失敗");
+      const at = Date.now();
+      missing.forEach((text) => translationFailures.set(cacheKey(text, sourceLocale, targetLocale), { message, at }));
+      return { ok: false, error: message };
     } finally {
       inFlight.delete(requestKey);
     }

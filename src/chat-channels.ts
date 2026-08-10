@@ -1,5 +1,5 @@
 import { playerFaction } from "./game-engine.js";
-import type { AppLocale, ChatMessage, GameState, Player } from "./types.js";
+import type { ChatMessage, GameState, Player } from "./types.js";
 
 type ChatChannel = "public" | "werewolf" | "lovers";
 type RuntimeMessage = ChatMessage & {
@@ -20,7 +20,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
 
   proto.handleClientMessage = async function (token: string, command: any): Promise<void> {
     if (command?.type === "chat" && command.channel && command.channel !== "public") {
-      return sendSecretChat.call(this, token, command.content, command.locale, command.channel);
+      return sendSecretChat.call(this, token, command.content, command.channel);
     }
     return originalHandleClientMessage.call(this, token, command);
   };
@@ -61,7 +61,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   };
 }
 
-function sendSecretChat(this: any, token: string, content: string, locale: AppLocale | undefined, channel: ChatChannel): void {
+function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
   const state = this.requireState() as GameState;
   const actor = this.playerByToken(state, token) as Player;
   if (!actor.alive || actor.isSpectator) throw new Error("只有存活的正式玩家可以使用秘密聊天");
@@ -76,8 +76,7 @@ function sendSecretChat(this: any, token: string, content: string, locale: AppLo
   const message = this.chatMessage(
     state,
     actor,
-    this.normalizeChat(content),
-    this.normalizeMessageLocale(locale)
+    this.normalizeChat(content)
   ) as RuntimeMessage;
   message.channel = channel;
   message.audienceIds = audienceIds;
