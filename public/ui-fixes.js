@@ -7,21 +7,9 @@
   const staticSources = new WeakMap();
 
   const LABELS = {
-    "zh-TW": {
-      collapse: "縮起",
-      expand: "展開",
-      translationError: "玩家聊天 Google 翻譯目前無法使用；請確認 Worker Secret GOOGLE_TRANSLATE_API_KEYS。"
-    },
-    "zh-CN": {
-      collapse: "收起",
-      expand: "展开",
-      translationError: "玩家聊天 Google 翻译目前不可用；请确认 Worker Secret GOOGLE_TRANSLATE_API_KEYS。"
-    },
-    en: {
-      collapse: "Collapse",
-      expand: "Expand",
-      translationError: "Google translation for player chat is unavailable. Check the GOOGLE_TRANSLATE_API_KEYS Worker Secret."
-    }
+    "zh-TW": { collapse: "縮起", expand: "展開", translationError: "玩家聊天 Google 翻譯目前無法使用；請確認 Worker Secret GOOGLE_TRANSLATE_API_KEYS。" },
+    "zh-CN": { collapse: "收起", expand: "展开", translationError: "玩家聊天 Google 翻译目前不可用；请确认 Worker Secret GOOGLE_TRANSLATE_API_KEYS。" },
+    en: { collapse: "Collapse", expand: "Expand", translationError: "Google translation for player chat is unavailable. Check the GOOGLE_TRANSLATE_API_KEYS Worker Secret." }
   };
 
   let latestState = null;
@@ -34,29 +22,17 @@
     const value = localStorage.getItem("werewolf-locale");
     return value === "zh-CN" || value === "en" ? value : "zh-TW";
   }
-
-  function label(key) {
-    return LABELS[locale()]?.[key] || LABELS["zh-TW"][key] || key;
-  }
-
-  function roomId() {
-    return location.pathname.toUpperCase().match(/^\/([A-Z2-9]{6})\/?$/)?.[1] || "";
-  }
-
+  function label(key) { return LABELS[locale()]?.[key] || LABELS["zh-TW"][key] || key; }
+  function roomId() { return location.pathname.toUpperCase().match(/^\/([A-Z2-9]{6})\/?$/)?.[1] || ""; }
   function roomToken() {
     if (websocketToken) return websocketToken;
     const id = roomId();
     if (!id) return "";
-    try {
-      return JSON.parse(localStorage.getItem(`werewolf-session:${id}`) || "null")?.token || "";
-    } catch {
-      return "";
-    }
+    try { return JSON.parse(localStorage.getItem(`werewolf-session:${id}`) || "null")?.token || ""; } catch { return ""; }
   }
 
-  // The app's generic i18n fallback previously sent arbitrary game UI/system text to
-  // Google Translation. Block that path. This file uses nativeFetch directly only
-  // for human-authored chat/formal speeches.
+  // Prevent the generic game/UI fallback from calling Google. The native fetch
+  // reference below is used only by requestChatTranslations for player-authored text.
   window.fetch = function guardedFetch(input, init) {
     try {
       const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url, location.href);
@@ -88,10 +64,8 @@
       }
     }
     Object.defineProperties(UiFixWebSocket, {
-      CONNECTING: { value: NativeWebSocket.CONNECTING },
-      OPEN: { value: NativeWebSocket.OPEN },
-      CLOSING: { value: NativeWebSocket.CLOSING },
-      CLOSED: { value: NativeWebSocket.CLOSED }
+      CONNECTING: { value: NativeWebSocket.CONNECTING }, OPEN: { value: NativeWebSocket.OPEN },
+      CLOSING: { value: NativeWebSocket.CLOSING }, CLOSED: { value: NativeWebSocket.CLOSED }
     });
     window.WebSocket = UiFixWebSocket;
   }
@@ -101,7 +75,6 @@
     const id = roomId();
     const token = roomToken();
     if (!id || !token) throw new Error("missing room translation session");
-
     const output = [];
     for (let index = 0; index < texts.length; index += 40) {
       const chunk = texts.slice(index, index + 40);
@@ -112,9 +85,7 @@
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-      if (!Array.isArray(body.translations) || body.translations.length !== chunk.length) {
-        throw new Error("translation response length mismatch");
-      }
+      if (!Array.isArray(body.translations) || body.translations.length !== chunk.length) throw new Error("translation response length mismatch");
       output.push(...body.translations.map((value, i) => typeof value === "string" && value.trim() ? value.trim() : chunk[i]));
     }
     return output;
@@ -142,17 +113,8 @@
     actions.prepend(node);
     return node;
   }
-
-  function showTranslationError() {
-    const node = statusNode();
-    if (!node) return;
-    node.textContent = label("translationError");
-    node.classList.remove("hidden");
-  }
-
-  function clearTranslationError() {
-    statusNode()?.classList.add("hidden");
-  }
+  function showTranslationError() { const node = statusNode(); if (node) { node.textContent = label("translationError"); node.classList.remove("hidden"); } }
+  function clearTranslationError() { statusNode()?.classList.add("hidden"); }
 
   async function translateMessages(runGeneration) {
     if (!latestState?.messages?.length || runGeneration !== generation) return;
@@ -181,7 +143,6 @@
         return;
       }
 
-      // Only human/AI player-authored free chat and formal speeches use Google Translation.
       if (sourceLocale === targetLocale) {
         if (body && body.textContent !== source) body.textContent = source;
         if (body && body.title !== source) body.title = source;
@@ -235,8 +196,7 @@
     const targetLocale = locale();
     const fixed = staticI18n();
     if (!fixed) return;
-    const root = document.body;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
       const parent = node.parentElement;
@@ -250,10 +210,10 @@
         staticSources.set(node, source);
       }
       const translated = fixed.text(source, targetLocale);
-      if (translated === source && targetLocale !== "zh-TW") continue;
       const original = node.nodeValue || "";
-      const start = original.indexOf(current);
-      const next = `${original.slice(0, start)}${translated}${original.slice(start + current.length)}`;
+      const trimmed = original.trim();
+      const start = original.indexOf(trimmed);
+      const next = `${original.slice(0, start)}${translated}${original.slice(start + trimmed.length)}`;
       if (next !== original) node.nodeValue = next;
     }
   }
@@ -262,10 +222,7 @@
     const runGeneration = generation;
     translateRoleCatalog();
     translateFixedGameDom();
-    if (!roomId() || locale() === "zh-TW") {
-      clearTranslationError();
-      return;
-    }
+    if (!roomId() || locale() === "zh-TW") { clearTranslationError(); return; }
     try {
       await translateMessages(runGeneration);
       if (runGeneration === generation) clearTranslationError();
@@ -282,12 +239,7 @@
   }
 
   function installPanelCollapse() {
-    const panels = [
-      ["action", document.querySelector(".action-card")],
-      ["chat", document.querySelector(".chat-card")],
-      ["players", document.querySelector(".players-card")],
-      ["host", document.querySelector("#hostPanel")]
-    ];
+    const panels = [["action", document.querySelector(".action-card")],["chat", document.querySelector(".chat-card")],["players", document.querySelector(".players-card")],["host", document.querySelector("#hostPanel")]];
     for (const [key, panel] of panels) {
       if (!panel) continue;
       const heading = panel.querySelector(":scope > .section-heading");
@@ -331,41 +283,29 @@
       };
       head.addEventListener("click", toggle);
       head.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          toggle();
-        }
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); }
       });
     }
   }
 
   function schedule() {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      installPanelCollapse();
-      installRoleGroupCollapse();
-      void translateDynamicContent();
-    }, 0);
+    timer = setTimeout(() => { installPanelCollapse(); installRoleGroupCollapse(); void translateDynamicContent(); }, 0);
   }
 
   function init() {
     installPanelCollapse();
     installRoleGroupCollapse();
     statusNode();
-
     document.querySelector("#languageSelect")?.addEventListener("change", () => {
       generation += 1;
       chatCache.clear();
       setTimeout(() => {
-        installPanelCollapse();
-        installRoleGroupCollapse();
-        document.querySelectorAll("[data-panel-collapse]").forEach((button) => {
-          syncCollapseButton(button, button.closest(".panel")?.classList.contains("panel-collapsed"));
-        });
+        installPanelCollapse(); installRoleGroupCollapse();
+        document.querySelectorAll("[data-panel-collapse]").forEach((button) => syncCollapseButton(button, button.closest(".panel")?.classList.contains("panel-collapsed")));
         void translateDynamicContent();
       }, 0);
     });
-
     const game = document.querySelector("#game");
     if (game) new MutationObserver(schedule).observe(game, { childList: true, subtree: true });
     const dialog = document.querySelector("#confirmDialog");
