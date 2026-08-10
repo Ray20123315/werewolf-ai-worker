@@ -52,18 +52,27 @@ test("start-game DOM observers cannot self-trigger an infinite disabled or child
   assert.match(ui, /if \(button\.textContent !== symbol\) button\.textContent = symbol/);
 });
 
-test("AI join has an independent capture-phase controller and authoritative reload path", () => {
+test("AI bulk join keeps the page and form state while storing keys for every created AI", () => {
   const ai = source("../public/ai-form.js");
   const html = source("../public/index.html");
   const index = source("../src/index.ts");
   const room = source("../src/room.ts");
 
+  assert.match(html, /name="count"[^>]*min="1"[^>]*max="100"[^>]*value="1"/);
+  assert.match(html, /id="aiNameBaseLabel"/);
+  assert.match(html, /id="aiBatchHint"/);
   assert.match(html, /<script src="\/ai-form\.js"><\/script>\s*<script type="module" src="\/app\.js"><\/script>/s);
+
+  assert.match(ai, /const BATCH_MAX = 100/);
+  assert.match(ai, /Array\.from\(\{ length: count \}, \(_, index\) => normalizeName\(`\$\{base\}\$\{index \+ 1\}`\)\)/);
+  assert.match(ai, /assertNamesAvailable\(id, session\.token, names\)/);
+  assert.match(ai, /for \(const item of names\)/);
+  assert.match(ai, /fetch\(url, options\)/);
+  assert.match(ai, /keys\[body\.playerId\] = apiKeys;\s*writeAIKeys\(id, keys\);/s);
   assert.match(ai, /form\.addEventListener\("submit", handleSubmit, \{ capture: true \}\)/);
   assert.match(ai, /event\.stopImmediatePropagation\(\)/);
-  assert.match(ai, /fetch\(`\/api\/rooms\/\$\{id\}\/ai`/);
-  assert.match(ai, /sessionStorage\.setItem\(aiKeyStorageKey\(id\)/);
-  assert.match(ai, /setTimeout\(\(\) => location\.reload\(\), 350\)/);
+  assert.doesNotMatch(ai, /form\.reset\(/);
+  assert.doesNotMatch(ai, /location\.reload\(/);
   assert.doesNotMatch(ai, /event\.currentTarget/);
 
   assert.match(index, /action === "ai" && request\.method === "POST"/);
@@ -71,6 +80,17 @@ test("AI join has an independent capture-phase controller and authoritative relo
   assert.match(room, /async addAI\(hostToken: string, name: string, ai: AIConfig\)/);
   assert.match(room, /state\.players\.push\(player\)/);
   assert.match(room, /this\.touchAndSave\(state\);\s*this\.broadcast\(state\);/s);
+});
+
+test("AI bulk form owns fixed zh-TW, zh-CN, and en labels", () => {
+  const ai = source("../public/ai-form.js");
+  assert.match(ai, /"zh-TW"/);
+  assert.match(ai, /"zh-CN"/);
+  assert.match(ai, /en:/);
+  assert.match(ai, /nameBase: "AI 名稱基底"/);
+  assert.match(ai, /nameBase: "AI 名称前缀"/);
+  assert.match(ai, /nameBase: "AI name prefix"/);
+  assert.match(ai, /languageSelect/);
 });
 
 test("fixed game translation stays local while player chat keeps the native remote path", () => {

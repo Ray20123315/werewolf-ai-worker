@@ -139,12 +139,14 @@
             <details>
               <summary>選用 AI（BYOK）</summary>
               <form id="addAIForm" class="stack-form">
-                <label>AI 名稱<input name="name" maxlength="24" required placeholder="例如：Gemini 7號" /></label>
+                <label><span id="aiNameBaseLabel" data-no-translate>AI 名稱基底</span><input name="name" maxlength="24" required data-no-translate placeholder="例如：Gemini" /></label>
+                <label><span id="aiCountLabel" data-no-translate>批量數量</span><input name="count" id="aiBatchCount" type="number" min="1" max="100" step="1" value="1" inputmode="numeric" required /></label>
+                <p id="aiBatchHint" class="field-help" data-no-translate>名稱會自動加上流水號，例如名稱基底 Gemini、數量 5，會建立 Gemini1～Gemini5。單批最多 100 隻。</p>
                 <label>Provider<select name="provider" id="aiProvider"><option value="openai">OpenAI GPT</option><option value="gemini">Google Gemini</option><option value="deepseek">DeepSeek</option><option value="openai-compatible">OpenAI-compatible</option></select></label>
                 <label>Model<input name="model" id="aiModel" required value="gpt-5.6-luna" /></label>
                 <label id="aiBaseUrlRow" class="hidden">Base URL<input name="baseUrl" placeholder="https://provider.example/v1" /></label>
                 <label>API Keys <span class="optional">最多 8 組，只存此瀏覽器 session</span><textarea name="apiKeys" rows="4" autocomplete="off" required placeholder="每行一組 API Key；遇到無效、限流或暫時性錯誤會自動切換下一組"></textarea></label>
-                <button class="button button-secondary full" type="submit">加入 AI 玩家</button>
+                <button class="button button-secondary full" type="submit"><span id="aiSubmitLabel" data-no-translate>批量加入 AI 玩家</span></button>
               </form>
               <div id="pendingAIBox" class="pending-ai hidden"></div>
             </details>
