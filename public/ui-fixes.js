@@ -7,9 +7,9 @@
   const staticSources = new WeakMap();
 
   const LABELS = {
-    "zh-TW": { collapse: "縮起", expand: "展開", translationError: "玩家聊天 Google 翻譯目前無法使用；請確認 Worker Secret GOOGLE_TRANSLATE_API_KEYS。" },
-    "zh-CN": { collapse: "收起", expand: "展开", translationError: "玩家聊天 Google 翻译目前不可用；请确认 Worker Secret GOOGLE_TRANSLATE_API_KEYS。" },
-    en: { collapse: "Collapse", expand: "Expand", translationError: "Google translation for player chat is unavailable. Check the GOOGLE_TRANSLATE_API_KEYS Worker Secret." }
+    "zh-TW": { collapse: "縮起", expand: "展開", translationError: "玩家聊天翻譯目前無法使用；將保留原文。" },
+    "zh-CN": { collapse: "收起", expand: "展开", translationError: "玩家聊天翻译目前不可用；将保留原文。" },
+    en: { collapse: "Collapse", expand: "Expand", translationError: "Player chat translation is unavailable; original text is shown." }
   };
 
   let latestState = null;
@@ -31,8 +31,8 @@
     try { return JSON.parse(localStorage.getItem(`werewolf-session:${id}`) || "null")?.token || ""; } catch { return ""; }
   }
 
-  // Prevent the generic game/UI fallback from calling Google. The native fetch
-  // reference below is used only by requestChatTranslations for player-authored text.
+  // Prevent the generic game/UI fallback from calling remote translation. The
+  // native fetch reference below is used only for player-authored chat/speech.
   window.fetch = function guardedFetch(input, init) {
     try {
       const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url, location.href);
