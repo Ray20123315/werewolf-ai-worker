@@ -159,6 +159,15 @@ test("weighted voting supports zero-weight and PK top target detection", () => {
   assert.deepEqual(new Set(topWeightedVoteTargets(state)), new Set(["v", "w"]));
 });
 
+test("sheriff exile vote counts as two and stacks with role vote bonuses", () => {
+  const state = baseState([p("s", "villager"), p("v", "villager"), p("w", "werewolf")], { s: "w", v: "w", w: "v" });
+  state.sheriff.enabled = true;
+  state.sheriff.sheriffId = "s";
+  assert.deepEqual(weightedVoteCounts(state), { w: 3, v: 1 });
+  state.roleMemory.s = { voteBonus: 2 };
+  assert.deepEqual(weightedVoteCounts(state), { w: 5, v: 1 });
+});
+
 test("guard prevents a wolf kill", () => {
   const result = resolveNight({
     players: [],
