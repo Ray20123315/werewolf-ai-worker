@@ -11,18 +11,14 @@ import type {
   WitchAction
 } from "./types";
 
-export function defaultRoleSetup(playerCount: number): RoleSetup {
-  const count = Math.max(1, Math.trunc(playerCount));
-  const werewolf = Math.max(1, Math.floor(count / 4));
-  const seer = count >= 4 ? 1 : 0;
-  const witch = count >= 6 ? 1 : 0;
-  const guard = count >= 8 ? 1 : 0;
-  const reserved = werewolf + seer + witch + guard;
-  return { werewolf, villager: Math.max(0, count - reserved), seer, witch, guard };
+export function defaultRoleSetup(_playerCount: number): RoleSetup {
+  const setup: RoleSetup = {};
+  for (const def of ROLE_LIST) setup[def.id] = 1;
+  return setup;
 }
 
 export function growRoleSetup(setup: RoleSetup): RoleSetup {
-  return { ...setup, villager: (setup.villager ?? 0) + 1 };
+  return { ...setup };
 }
 
 export function roleSetupTotal(setup: RoleSetup): number {
@@ -41,22 +37,47 @@ export function validateRoleSetup(setup: RoleSetup, playerCount: number): string
     if (!Number.isInteger(raw) || (raw ?? -1) < 0) return `${role} 數量必須是 0 以上整數`;
   }
   if (!Number.isInteger(playerCount) || playerCount < 3) return "至少需要 3 名正式玩家才能開始";
-  if (roleSetupTotal(setup) !== playerCount) return `角色總數必須等於正式玩家數（目前 ${roleSetupTotal(setup)} / ${playerCount}）`;
+  const total = roleSetupTotal(setup);
+  if (total < playerCount) return `角色總數至少要等於正式玩家數（目前 ${total} / ${playerCount}）`;
   const wolves = factionCountInSetup(setup, "werewolf");
   if (wolves < 1) return "至少需要 1 名狼人陣營角色";
-  if (wolves >= playerCount - wolves) return "開局時狼人陣營人數必須少於其他玩家總數";
+  const nonWolves = total - wolves;
+  const maxWolves = Math.floor((playerCount - 1) / 2);
+  const minNonWolves = playerCount - maxWolves;
+  if (nonWolves < minNonWolves) return `非狼人陣營角色不足，至少需要 ${minNonWolves} 名才能維持開局狼人少於其他玩家`;
   return undefined;
 }
 
 export function roleDeckFromSetup(setup: RoleSetup, playerCount: number): Role[] {
   const error = validateRoleSetup(setup, playerCount);
   if (error) throw new Error(error);
-  const deck: Role[] = [];
+
+  const wolfPool: Role[] = [];
+  const nonWolfPool: Role[] = [];
   for (const def of ROLE_LIST) {
     const count = setup[def.id] ?? 0;
-    for (let i = 0; i < count; i += 1) deck.push(def.id);
+    const target = def.faction === "werewolf" ? wolfPool : nonWolfPool;
+    for (let i = 0; i < count; i += 1) target.push(def.id);
   }
-  return deck;
+
+  const shuffledWolves = secureShuffle(wolfPool);
+  const guaranteedWolf = shuffledWolves.shift();
+  if (!guaranteedWolf) throw new Error("至少需要 1 名狼人陣營角色");
+
+  const deck: Role[] = [guaranteedWolf];
+  let wolfCount = 1;
+  const maxWolves = Math.floor((playerCount - 1) / 2);
+  const candidates = secureShuffle([...shuffledWolves, ...nonWolfPool]);
+  for (const role of candidates) {
+    if (deck.length >= playerCount) break;
+    const isWolf = roleDefinition(role).faction === "werewolf";
+    if (isWolf && wolfCount >= maxWolves) continue;
+    deck.push(role);
+    if (isWolf) wolfCount += 1;
+  }
+
+  if (deck.length !== playerCount) throw new Error(`無法從目前角色池安全選出 ${playerCount} 個角色`);
+  return secureShuffle(deck);
 }
 
 export function secureShuffle<T>(items: readonly T[]): T[] {
