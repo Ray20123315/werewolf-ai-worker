@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { callAI, parseJSONObject, type AIEnv } from "./ai";
+import { callAI, parseJSONObject } from "./ai";
 import {
   areNightActionsComplete,
   areVotesComplete,
@@ -9,23 +9,29 @@ import {
   checkWinner,
   createDebateOrder,
   currentDebaterId,
+  defaultRoleSetup,
   freshNightActions,
-  isDebateComplete,
+  growRoleSetup,
   isAIVotingUnlocked,
+  isDebateComplete,
   pluralityTarget,
   resolveNight,
-  teamForRole
+  teamForRole,
+  validateRoleSetup
 } from "./game-engine";
 import type {
   AIConfig,
+  AIOperation,
   ChatMessage,
   ClientMessage,
   GameState,
   NightClientAction,
+  PendingAITask,
   Player,
   PrivateView,
   PublicPlayer,
   Role,
+  RoleSetup,
   ServerMessage,
   WitchAction
 } from "./types";
@@ -35,10 +41,10 @@ type InitResult = { roomId: string; playerId: string; token: string };
 type JoinResult = { playerId: string; token: string };
 type AIJSON = { message?: unknown; targetId?: unknown; action?: unknown };
 
-export class GameRoom extends DurableObject<AIEnv> {
+export class GameRoom extends DurableObject<Env> {
   private stateCache: GameState | undefined;
 
-  constructor(ctx: DurableObjectState, env: AIEnv) {
+  constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.sql.exec(`
@@ -50,7 +56,7 @@ export class GameRoom extends DurableObject<AIEnv> {
     });
   }
 
-  async initialize(roomId: string, hostName: string, maxPlayers: number): Promise<InitResult> {
+  async initialize(roomId: string, hostName: string): Promise<InitResult> {
     const existing = this.loadState();
     if (existing) throw new Error("ROOM_ALREADY_EXISTS");
     const host = this.newPlayer(hostName, false);
@@ -58,10 +64,10 @@ export class GameRoom extends DurableObject<AIEnv> {
     const state: GameState = {
       roomId,
       hostPlayerId: host.id,
-      maxPlayers,
       phase: "lobby",
       round: 0,
       players: [host],
+      roleSetup: defaultRoleSetup(1),
       messages: [],
       votes: {},
       nightActions: freshNightActions(),
@@ -76,7 +82,7 @@ export class GameRoom extends DurableObject<AIEnv> {
       createdAt: now,
       updatedAt: now
     };
-    this.addSystemMessage(state, `房間 ${roomId} 已建立。模式固定為辯論式。`);
+    this.addSystemMessage(state, `房間 ${roomId} 已建立。AI 為選用功能，角色可由房主設定。`);
     this.saveState(state);
     return { roomId, playerId: host.id, token: host.token };
   }
@@ -85,9 +91,9 @@ export class GameRoom extends DurableObject<AIEnv> {
     const state = this.requireState();
     this.assertLobby(state);
     this.assertPlayerName(state, name);
-    if (state.players.length >= state.maxPlayers) throw new Error("房間已滿");
     const player = this.newPlayer(name, false);
     state.players.push(player);
+    state.roleSetup = growRoleSetup(state.roleSetup);
     this.addSystemMessage(state, `${player.name} 加入房間。`);
     this.touchAndSave(state);
     this.broadcast(state);
@@ -99,14 +105,72 @@ export class GameRoom extends DurableObject<AIEnv> {
     this.assertHost(state, hostToken);
     this.assertLobby(state);
     this.assertPlayerName(state, name);
-    if (state.players.length >= state.maxPlayers) throw new Error("房間已滿");
     this.validateAIConfig(ai);
     const player = this.newPlayer(name, true, ai);
     state.players.push(player);
-    this.addSystemMessage(state, `AI 玩家 ${player.name} 加入房間（${ai.provider} / ${ai.model}）。`);
+    state.roleSetup = growRoleSetup(state.roleSetup);
+    this.addSystemMessage(state, `AI 玩家 ${player.name} 加入房間（${ai.provider} / ${ai.model}）。API Key 不會寫入房間狀態。`);
     this.touchAndSave(state);
     this.broadcast(state);
     return { playerId: player.id };
+  }
+
+  async runAI(hostToken: string, playerId: string, apiKey: string): Promise<{ ok: true }> {
+    const before = this.requireState();
+    this.assertHost(before, hostToken);
+    const task = this.pendingAITask(before);
+    if (!task || task.playerId !== playerId) throw new Error("此 AI 目前沒有待執行操作");
+    const actor = before.players.find((p) => p.id === playerId && p.isAI && p.alive);
+    if (!actor?.role || !actor.ai) throw new Error("AI 玩家狀態無效");
+
+    if (task.operation === "debate_speech") {
+      const message = await this.decideAIDebateMessage(before, actor, apiKey);
+      const state = this.requireState();
+      this.assertHost(state, hostToken);
+      const freshTask = this.pendingAITask(state);
+      const current = state.players.find((p) => p.id === playerId && p.isAI && p.alive);
+      if (!freshTask || freshTask.playerId !== playerId || freshTask.operation !== "debate_speech" || !current) {
+        throw new Error("AI 操作已過期，請重新同步房間狀態");
+      }
+      this.recordDebateSpeech(state, current, message);
+      if (isDebateComplete(state.debateOrder, state.debateIndex)) this.enterVote(state);
+      else {
+        this.touchAndSave(state);
+        this.broadcast(state);
+      }
+      return { ok: true };
+    }
+
+    if (task.operation === "vote") {
+      const targetId = await this.decideAIVote(before, actor, apiKey);
+      const state = this.requireState();
+      this.assertHost(state, hostToken);
+      const freshTask = this.pendingAITask(state);
+      const current = state.players.find((p) => p.id === playerId && p.isAI && p.alive);
+      const target = state.players.find((p) => p.id === targetId && p.alive && p.id !== playerId);
+      if (!freshTask || freshTask.playerId !== playerId || freshTask.operation !== "vote" || !current || !target) {
+        throw new Error("AI 投票已過期，請重新同步房間狀態");
+      }
+      state.votes[current.id] = target.id;
+      this.touchAndSave(state);
+      this.broadcast(state);
+      if (areVotesComplete(state)) this.finishVote(state);
+      return { ok: true };
+    }
+
+    const action = await this.decideAINightAction(before, actor, apiKey);
+    const state = this.requireState();
+    this.assertHost(state, hostToken);
+    const freshTask = this.pendingAITask(state);
+    const current = state.players.find((p) => p.id === playerId && p.isAI && p.alive);
+    if (!freshTask || freshTask.playerId !== playerId || freshTask.operation !== "night_action" || !current?.role) {
+      throw new Error("AI 夜晚操作已過期，請重新同步房間狀態");
+    }
+    this.applyNightAction(state, current, action);
+    this.touchAndSave(state);
+    this.broadcast(state);
+    if (areNightActionsComplete(state)) this.finishNight(state);
+    return { ok: true };
   }
 
   async getStateByToken(token: string): Promise<PrivateView> {
@@ -114,9 +178,7 @@ export class GameRoom extends DurableObject<AIEnv> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-      return new Response("Expected WebSocket", { status: 426 });
-    }
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("Expected WebSocket", { status: 426 });
     const url = new URL(request.url);
     const token = url.searchParams.get("token") ?? "";
     const state = this.requireState();
@@ -161,6 +223,12 @@ export class GameRoom extends DurableObject<AIEnv> {
       case "start":
         this.startGame(token);
         return;
+      case "chat":
+        this.sendChat(token, command.content);
+        return;
+      case "configure_roles":
+        this.configureRoles(token, command.roles);
+        return;
       case "debate_speech":
         this.submitDebateSpeech(token, command.content);
         return;
@@ -175,16 +243,32 @@ export class GameRoom extends DurableObject<AIEnv> {
     }
   }
 
+  private configureRoles(token: string, raw: RoleSetup): void {
+    const state = this.requireState();
+    this.assertHost(state, token);
+    this.assertLobby(state);
+    const roles = this.normalizeRoleSetup(raw);
+    const error = validateRoleSetup(roles, state.players.length);
+    if (error && state.players.length >= 3) throw new Error(error);
+    state.roleSetup = roles;
+    this.touchAndSave(state);
+    this.broadcast(state);
+  }
+
   private startGame(token: string): void {
     const state = this.requireState();
     this.assertHost(state, token);
     this.assertLobby(state);
-    if (state.players.length < 5) throw new Error("至少需要 5 名玩家才能開始");
-    state.players = assignRoles(state.players);
+    const roleError = validateRoleSetup(state.roleSetup, state.players.length);
+    if (roleError) throw new Error(roleError);
+    state.players = assignRoles(state.players, state.roleSetup);
     state.phase = "night";
     state.round = 1;
     state.votes = {};
     state.nightActions = freshNightActions();
+    state.seerResults = {};
+    state.witchHealAvailable = true;
+    state.witchPoisonAvailable = true;
     state.guardLastTargets = {};
     state.debateOrder = [];
     state.debateIndex = 0;
@@ -192,10 +276,22 @@ export class GameRoom extends DurableObject<AIEnv> {
     state.lastNightDeaths = [];
     delete state.lastVoteEliminated;
     delete state.winner;
-    this.addSystemMessage(state, "遊戲開始。固定採辯論式流程；天黑請閉眼。");
+    this.addSystemMessage(state, "遊戲開始。AI 是選用玩家；若有 AI，房主瀏覽器會用自己提供的 API Key 驅動其回合。天黑請閉眼。");
     this.touchAndSave(state);
     this.broadcast(state);
-    this.ctx.waitUntil(this.runAINightActions());
+  }
+
+  private sendChat(token: string, content: string): void {
+    const state = this.requireState();
+    const actor = this.playerByToken(state, token);
+    if (actor.isAI) throw new Error("AI 玩家不能使用自由聊天室");
+    if (state.phase === "night") throw new Error("夜晚階段關閉公開聊天");
+    if (state.phase !== "lobby" && state.phase !== "ended" && !actor.alive) throw new Error("已出局玩家不能在對局中公開聊天");
+    const text = this.normalizeChat(content);
+    state.messages.push(this.chatMessage(state, actor, text));
+    this.trimMessages(state);
+    this.touchAndSave(state);
+    this.broadcast(state);
   }
 
   private submitDebateSpeech(token: string, content: string): void {
@@ -205,17 +301,13 @@ export class GameRoom extends DurableObject<AIEnv> {
     if (!actor.alive) throw new Error("已出局玩家不能參與本輪辯論");
     const currentId = currentDebaterId(state.debateOrder, state.debateIndex);
     if (!currentId || currentId !== actor.id) throw new Error("尚未輪到你正式發言");
-    if (actor.isAI) throw new Error("AI 玩家由伺服器自動發言");
-
-    const text = this.normalizeSpeech(content);
-    this.recordDebateSpeech(state, actor, text);
-    if (isDebateComplete(state.debateOrder, state.debateIndex)) {
-      this.enterVote(state);
-      return;
+    if (actor.isAI) throw new Error("AI 玩家由房主提供的 BYOK API 驅動");
+    this.recordDebateSpeech(state, actor, this.normalizeSpeech(content));
+    if (isDebateComplete(state.debateOrder, state.debateIndex)) this.enterVote(state);
+    else {
+      this.touchAndSave(state);
+      this.broadcast(state);
     }
-    this.touchAndSave(state);
-    this.broadcast(state);
-    this.ctx.waitUntil(this.runAIDebateTurns());
   }
 
   private castVote(token: string, targetId: string): void {
@@ -223,18 +315,14 @@ export class GameRoom extends DurableObject<AIEnv> {
     if (state.phase !== "vote") throw new Error("目前不是放逐投票階段");
     const voter = this.playerByToken(state, token);
     if (!voter.alive) throw new Error("已出局玩家不能投票");
-    if (voter.isAI) throw new Error("AI 玩家由伺服器自動投票");
+    if (voter.isAI) throw new Error("AI 玩家由房主提供的 BYOK API 驅動");
     const target = state.players.find((p) => p.id === targetId && p.alive);
     if (!target) throw new Error("投票目標無效");
     if (target.id === voter.id) throw new Error("不能投給自己");
     state.votes[voter.id] = target.id;
     this.touchAndSave(state);
     this.broadcast(state);
-    if (areVotesComplete(state)) {
-      this.finishVote(state);
-      return;
-    }
-    this.ctx.waitUntil(this.runAIVotes());
+    if (areVotesComplete(state)) this.finishVote(state);
   }
 
   private submitNightAction(token: string, action: NightClientAction): void {
@@ -242,15 +330,11 @@ export class GameRoom extends DurableObject<AIEnv> {
     if (state.phase !== "night") throw new Error("目前不是夜晚階段");
     const actor = this.playerByToken(state, token);
     if (!actor.alive || !actor.role) throw new Error("目前不能執行夜晚技能");
-    if (actor.isAI) throw new Error("AI 玩家由伺服器自動執行夜晚行動");
+    if (actor.isAI) throw new Error("AI 玩家由房主提供的 BYOK API 驅動");
     this.applyNightAction(state, actor, action);
     this.touchAndSave(state);
     this.broadcast(state);
-    if (areNightActionsComplete(state)) {
-      this.finishNight(state);
-    } else {
-      this.ctx.waitUntil(this.runAINightActions());
-    }
+    if (areNightActionsComplete(state)) this.finishNight(state);
   }
 
   private applyNightAction(state: GameState, actor: Player, action: NightClientAction): void {
@@ -287,9 +371,7 @@ export class GameRoom extends DurableObject<AIEnv> {
       if (!state.witchHealAvailable) throw new Error("解藥已使用");
       const victim = this.witchKnownVictim(state);
       if (!victim) throw new Error("目前沒有可使用解藥的狼人擊殺目標");
-      if (victim === actor.id && !canWitchSelfSave(state.players.length, state.round)) {
-        throw new Error("此人數／輪次設定下女巫不能自救");
-      }
+      if (victim === actor.id && !canWitchSelfSave(state.players.length, state.round)) throw new Error("此人數／輪次設定下女巫不能自救");
     }
     if (action.type === "poison") {
       if (!state.witchPoisonAvailable) throw new Error("毒藥已使用");
@@ -310,9 +392,7 @@ export class GameRoom extends DurableObject<AIEnv> {
     const witchAction = Object.values(state.nightActions.witchActions)[0];
     if (witchAction?.type === "heal" && resolution.healed) state.witchHealAvailable = false;
     if (witchAction?.type === "poison") state.witchPoisonAvailable = false;
-    for (const [guardId, targetId] of Object.entries(state.nightActions.guardTargets)) {
-      state.guardLastTargets[guardId] = targetId;
-    }
+    for (const [guardId, targetId] of Object.entries(state.nightActions.guardTargets)) state.guardLastTargets[guardId] = targetId;
 
     state.lastNightDeaths = resolution.deaths;
     for (const id of resolution.deaths) {
@@ -328,9 +408,8 @@ export class GameRoom extends DurableObject<AIEnv> {
 
     state.nightActions = freshNightActions();
     state.votes = {};
-    if (state.lastNightDeaths.length === 0) {
-      this.addSystemMessage(state, `第 ${state.round} 天早晨：昨夜是平安夜。`);
-    } else {
+    if (state.lastNightDeaths.length === 0) this.addSystemMessage(state, `第 ${state.round} 天早晨：昨夜是平安夜。`);
+    else {
       const names = state.lastNightDeaths.map((id) => state.players.find((p) => p.id === id)?.name ?? "未知玩家");
       this.addSystemMessage(state, `第 ${state.round} 天早晨：${names.join("、")} 昨夜死亡。`);
     }
@@ -343,10 +422,9 @@ export class GameRoom extends DurableObject<AIEnv> {
     state.debateIndex = 0;
     state.debateCompleted = [];
     const names = state.debateOrder.map((id) => state.players.find((p) => p.id === id)?.name ?? "未知玩家");
-    this.addSystemMessage(state, `本日進入依序辯論。發言順序：${names.join(" → ")}。所有存活玩家完成發言後才會開放放逐票。`);
+    this.addSystemMessage(state, `本日進入依序辯論。發言順序：${names.join(" → ")}。自由聊天仍可使用，但正式發言完成後才會推進順位。`);
     this.touchAndSave(state);
     this.broadcast(state);
-    this.ctx.waitUntil(this.runAIDebateTurns());
   }
 
   private recordDebateSpeech(state: GameState, actor: Player, text: string): void {
@@ -359,10 +437,9 @@ export class GameRoom extends DurableObject<AIEnv> {
   private enterVote(state: GameState): void {
     state.phase = "vote";
     state.votes = {};
-    this.addSystemMessage(state, "本輪所有存活玩家已完成正式發言，現在進入放逐投票。平票則本輪無人出局。AI 在仍有真人存活時不會搶先投第一票。 ");
+    this.addSystemMessage(state, "本輪所有存活玩家已完成正式發言，現在進入放逐投票。平票則本輪無人出局。AI 在仍有真人存活時會等至少一名真人先投票。 ");
     this.touchAndSave(state);
     this.broadcast(state);
-    this.ctx.waitUntil(this.runAIVotes());
   }
 
   private finishVote(state: GameState): void {
@@ -396,176 +473,89 @@ export class GameRoom extends DurableObject<AIEnv> {
     this.addSystemMessage(state, `第 ${state.round} 夜開始。天黑請閉眼。`);
     this.touchAndSave(state);
     this.broadcast(state);
-    this.ctx.waitUntil(this.runAINightActions());
   }
 
   private endGame(state: GameState, winner: "werewolf" | "village"): void {
     state.phase = "ended";
     state.winner = winner;
-    const label = winner === "werewolf" ? "狼人陣營" : "村民陣營";
-    this.addSystemMessage(state, `遊戲結束：${label}獲勝。`);
+    this.addSystemMessage(state, `遊戲結束：${winner === "werewolf" ? "狼人陣營" : "村民陣營"}獲勝。`);
     this.touchAndSave(state);
     this.broadcast(state);
   }
 
-  private async runAINightActions(): Promise<void> {
-    for (;;) {
-      const state = this.requireState();
-      if (state.phase !== "night") return;
-      const actor = state.players.find((p) => p.isAI && p.alive && p.role && this.needsNightAction(state, p));
-      if (!actor?.role) return;
-      const action = await this.decideAINightAction(state, actor);
-      const fresh = this.requireState();
-      if (fresh.phase !== "night") return;
-      const currentActor = fresh.players.find((p) => p.id === actor.id && p.alive);
-      if (!currentActor?.role || !this.needsNightAction(fresh, currentActor)) continue;
-      this.applyNightAction(fresh, currentActor, action);
-      this.touchAndSave(fresh);
-      this.broadcast(fresh);
-      if (areNightActionsComplete(fresh)) {
-        this.finishNight(fresh);
-        return;
-      }
+  private pendingAITask(state: GameState): PendingAITask | undefined {
+    if (state.phase === "debate") {
+      const id = currentDebaterId(state.debateOrder, state.debateIndex);
+      const actor = state.players.find((p) => p.id === id && p.alive && p.isAI);
+      return actor ? { playerId: actor.id, operation: "debate_speech" } : undefined;
     }
-  }
-
-  private async runAIDebateTurns(): Promise<void> {
-    for (;;) {
-      const state = this.requireState();
-      if (state.phase !== "debate") return;
-      if (isDebateComplete(state.debateOrder, state.debateIndex)) {
-        this.enterVote(state);
-        return;
-      }
-      const currentId = currentDebaterId(state.debateOrder, state.debateIndex);
-      const actor = state.players.find((p) => p.id === currentId && p.alive);
-      if (!actor) {
-        state.debateIndex += 1;
-        this.touchAndSave(state);
-        continue;
-      }
-      if (!actor.isAI) return;
-
-      const message = await this.decideAIDebateMessage(state, actor);
-      const fresh = this.requireState();
-      if (fresh.phase !== "debate") return;
-      const freshCurrentId = currentDebaterId(fresh.debateOrder, fresh.debateIndex);
-      const current = fresh.players.find((p) => p.id === actor.id && p.alive && p.isAI);
-      if (!current || freshCurrentId !== current.id) continue;
-      this.recordDebateSpeech(fresh, current, message);
-      if (isDebateComplete(fresh.debateOrder, fresh.debateIndex)) {
-        this.enterVote(fresh);
-        return;
-      }
-      this.touchAndSave(fresh);
-      this.broadcast(fresh);
-    }
-  }
-
-  private async runAIVotes(): Promise<void> {
-    for (;;) {
-      const state = this.requireState();
-      if (state.phase !== "vote") return;
-      if (!isAIVotingUnlocked(state.players, state.votes)) return;
+    if (state.phase === "vote") {
+      if (!isAIVotingUnlocked(state.players, state.votes)) return undefined;
       const actor = state.players.find((p) => p.isAI && p.alive && !state.votes[p.id]);
-      if (!actor) return;
-      const targetId = await this.decideAIVote(state, actor);
-      const fresh = this.requireState();
-      if (fresh.phase !== "vote" || !isAIVotingUnlocked(fresh.players, fresh.votes)) return;
-      const current = fresh.players.find((p) => p.id === actor.id && p.alive && p.isAI);
-      const target = fresh.players.find((p) => p.id === targetId && p.alive && p.id !== actor.id);
-      if (!current || !target || fresh.votes[current.id]) continue;
-      fresh.votes[current.id] = target.id;
-      this.touchAndSave(fresh);
-      this.broadcast(fresh);
-      if (areVotesComplete(fresh)) {
-        this.finishVote(fresh);
-        return;
-      }
+      return actor ? { playerId: actor.id, operation: "vote" } : undefined;
     }
+    if (state.phase === "night") {
+      const actor = state.players.find((p) => p.isAI && p.alive && p.role && this.needsNightAction(state, p));
+      return actor ? { playerId: actor.id, operation: "night_action" } : undefined;
+    }
+    return undefined;
   }
 
-  private async decideAIDebateMessage(state: GameState, actor: Player): Promise<string> {
-    const fallback = `我先依照目前公開資訊整理：昨夜結果與前面發言都要一起看，暫時保留一到兩個可疑位，等票型再驗證，不會只因跟風就直接定狼。`;
-    if (!actor.ai || !actor.role) return fallback;
+  private async decideAIDebateMessage(state: GameState, actor: Player, apiKey: string): Promise<string> {
+    if (!actor.ai || !actor.role) throw new Error("AI 設定不存在");
     const system = this.aiSystemPrompt(actor, state);
     const priorSpeeches = state.messages
-      .filter((m) => m.round === state.round && m.phase === "debate" && m.kind === "speech")
-      .slice(-12)
+      .filter((m) => m.round === state.round && m.phase === "debate" && (m.kind === "speech" || m.kind === "chat"))
+      .slice(-20)
       .map((m) => `${m.playerName}: ${m.content}`)
       .join("\n");
-    const prompt = `${this.privateContext(state, actor)}\n\n本輪已發言內容：\n${priorSpeeches || "你是本輪第一位發言者。"}\n\n現在輪到你進行正式辯論發言。請回傳 JSON：{"message":"80~180 字繁體中文發言"}。發言至少要包含：一個可驗證的推理依據、一個目前站邊或懷疑方向；要回應前面玩家的邏輯（若已有發言），不能只喊『我投某人』或無理由跟票。`;
-    try {
-      const result = await callAI(this.env, { config: actor.ai, system, prompt });
-      const parsed = parseJSONObject(result.text) as AIJSON;
-      return typeof parsed.message === "string" && parsed.message.trim() ? this.normalizeSpeech(parsed.message) : fallback;
-    } catch (error) {
-      this.logAIError(actor, "debate_speech", error);
-      return fallback;
-    }
+    const prompt = `${this.privateContext(state, actor)}\n\n本輪公開內容：\n${priorSpeeches || "你是本輪第一位正式發言者。"}\n\n現在輪到你正式發言。只回傳 JSON：{"message":"80~180 字繁體中文發言"}。必須包含可驗證的推理依據與目前懷疑／站邊方向。`;
+    const result = await callAI(apiKey, { config: actor.ai, system, prompt });
+    const parsed = parseJSONObject(result.text) as AIJSON;
+    if (typeof parsed.message !== "string" || !parsed.message.trim()) throw new Error("AI 沒有回傳有效發言");
+    return this.normalizeSpeech(parsed.message);
   }
 
-  private async decideAIVote(state: GameState, actor: Player): Promise<string> {
+  private async decideAIVote(state: GameState, actor: Player, apiKey: string): Promise<string> {
     const candidates = state.players.filter((p) => p.alive && p.id !== actor.id);
-    const fallback = this.fallbackTarget(candidates, actor, state.round);
-    if (!actor.ai || !actor.role) return fallback;
+    if (!actor.ai || !actor.role) throw new Error("AI 設定不存在");
     const system = this.aiSystemPrompt(actor, state);
-    const prompt = `${this.privateContext(state, actor)}\n\n辯論已結束。候選：${candidates.map((p) => `${p.id}=${p.name}`).join(", ")}。請根據公開發言、夜間結果與你合法知道的私密資訊做一致的陣營策略，只回傳 JSON：{"targetId":"玩家ID"}。`;
-    try {
-      const result = await callAI(this.env, { config: actor.ai, system, prompt });
-      const parsed = parseJSONObject(result.text) as AIJSON;
-      const targetId = typeof parsed.targetId === "string" ? parsed.targetId : "";
-      return candidates.some((p) => p.id === targetId) ? targetId : fallback;
-    } catch (error) {
-      this.logAIError(actor, "vote", error);
-      return fallback;
-    }
+    const prompt = `${this.privateContext(state, actor)}\n\n辯論已結束。候選：${candidates.map((p) => `${p.id}=${p.name}`).join(", ")}。只回傳 JSON：{"targetId":"玩家ID"}。`;
+    const result = await callAI(apiKey, { config: actor.ai, system, prompt });
+    const parsed = parseJSONObject(result.text) as AIJSON;
+    const targetId = typeof parsed.targetId === "string" ? parsed.targetId : "";
+    return candidates.some((p) => p.id === targetId) ? targetId : this.fallbackTarget(candidates, actor, state.round);
   }
 
-  private async decideAINightAction(state: GameState, actor: Player): Promise<NightClientAction> {
-    if (!actor.role) throw new Error("AI 身份不存在");
-    if (actor.role === "witch") return this.decideAIWitchAction(state, actor);
-
+  private async decideAINightAction(state: GameState, actor: Player, apiKey: string): Promise<NightClientAction> {
+    if (!actor.role || !actor.ai) throw new Error("AI 設定不存在");
+    if (actor.role === "witch") return this.decideAIWitchAction(state, actor, apiKey);
     const candidates = this.nightCandidates(state, actor);
     const fallbackTarget = this.fallbackTarget(candidates, actor, state.round);
-    const fallback = this.roleAction(actor.role, fallbackTarget);
-    if (!actor.ai) return fallback;
-
     const system = this.aiSystemPrompt(actor, state);
-    const prompt = `${this.privateContext(state, actor)}\n\n夜晚合法目標：${candidates.map((p) => `${p.id}=${p.name}`).join(", ")}。請只回傳 JSON：{"targetId":"玩家ID"}。`;
-    try {
-      const result = await callAI(this.env, { config: actor.ai, system, prompt });
-      const parsed = parseJSONObject(result.text) as AIJSON;
-      const targetId = typeof parsed.targetId === "string" ? parsed.targetId : "";
-      const valid = candidates.some((p) => p.id === targetId) ? targetId : fallbackTarget;
-      return this.roleAction(actor.role, valid);
-    } catch (error) {
-      this.logAIError(actor, "night_action", error);
-      return fallback;
-    }
+    const prompt = `${this.privateContext(state, actor)}\n\n夜晚合法目標：${candidates.map((p) => `${p.id}=${p.name}`).join(", ")}。只回傳 JSON：{"targetId":"玩家ID"}。`;
+    const result = await callAI(apiKey, { config: actor.ai, system, prompt });
+    const parsed = parseJSONObject(result.text) as AIJSON;
+    const targetId = typeof parsed.targetId === "string" ? parsed.targetId : "";
+    const valid = candidates.some((p) => p.id === targetId) ? targetId : fallbackTarget;
+    return this.roleAction(actor.role, valid);
   }
 
-  private async decideAIWitchAction(state: GameState, actor: Player): Promise<NightClientAction> {
+  private async decideAIWitchAction(state: GameState, actor: Player, apiKey: string): Promise<NightClientAction> {
+    if (!actor.ai) throw new Error("AI 設定不存在");
     const victim = this.witchKnownVictim(state);
     const maySelfSave = victim !== actor.id || canWitchSelfSave(state.players.length, state.round);
     const canHeal = Boolean(victim && state.witchHealAvailable && maySelfSave);
     const poisonCandidates = state.players.filter((p) => p.alive && p.id !== actor.id);
-    const fallbackAction: WitchAction = canHeal ? { type: "heal" } : { type: "pass" };
-    if (!actor.ai) return { kind: "witch", action: fallbackAction };
     const system = this.aiSystemPrompt(actor, state);
     const prompt = `${this.privateContext(state, actor)}\n\n狼人目前確定的擊殺目標：${victim ?? "無或尚未確定"}。解藥：${state.witchHealAvailable ? "可用" : "已用"}；本次是否允許救此目標：${canHeal ? "是" : "否"}；毒藥：${state.witchPoisonAvailable ? "可用" : "已用"}。可毒目標：${poisonCandidates.map((p) => `${p.id}=${p.name}`).join(", ")}。只回傳 JSON，三選一：{"action":"heal"}、{"action":"poison","targetId":"玩家ID"}、{"action":"pass"}。`;
-    try {
-      const result = await callAI(this.env, { config: actor.ai, system, prompt });
-      const parsed = parseJSONObject(result.text) as AIJSON;
-      if (parsed.action === "heal" && canHeal) return { kind: "witch", action: { type: "heal" } };
-      if (parsed.action === "poison" && state.witchPoisonAvailable && typeof parsed.targetId === "string" && poisonCandidates.some((p) => p.id === parsed.targetId)) {
-        return { kind: "witch", action: { type: "poison", targetId: parsed.targetId } };
-      }
-      return { kind: "witch", action: { type: "pass" } };
-    } catch (error) {
-      this.logAIError(actor, "witch_action", error);
-      return { kind: "witch", action: fallbackAction };
+    const result = await callAI(apiKey, { config: actor.ai, system, prompt });
+    const parsed = parseJSONObject(result.text) as AIJSON;
+    if (parsed.action === "heal" && canHeal) return { kind: "witch", action: { type: "heal" } };
+    if (parsed.action === "poison" && state.witchPoisonAvailable && typeof parsed.targetId === "string" && poisonCandidates.some((p) => p.id === parsed.targetId)) {
+      return { kind: "witch", action: { type: "poison", targetId: parsed.targetId } };
     }
+    return { kind: "witch", action: { type: "pass" } };
   }
 
   private roleAction(role: Role, targetId: string): NightClientAction {
@@ -600,21 +590,19 @@ export class GameRoom extends DurableObject<AIEnv> {
       : "無";
     const seer = actor.role === "seer" ? JSON.stringify(state.seerResults[actor.id] ?? {}) : "{}";
     return [
-      "你正在進行繁體中文『辯論式狼人殺』。你是玩家，不是主持人。",
-      "這不是暴民式或即時 PvP：白天必須依照發言順位，以公開資訊、前後矛盾、站邊、夜間死亡與票型進行推理。",
+      "你正在進行繁體中文狼人殺。你是玩家，不是主持人。",
+      "白天有自由聊天與依序正式發言；正式發言仍需依伺服器順位完成後才開放投票。",
       `你的名字：${actor.name}。你的身份：${actor.role ?? "未知"}。`,
       `狼人隊友（只有你是狼人時才可信）：${teammates}。`,
       `你的預言家查驗紀錄（只有你是預言家時才可信）：${seer}。`,
-      "不得捏造不存在的系統規則，不得要求或輸出 API Key。",
-      "公開發言可以策略性跳身份，但不能聲稱看過你依法不可能取得的伺服器私密資訊。",
-      "每次正式發言要有推理依據與可被其他玩家反駁的判斷；不要無理由跟票。",
+      "不得要求、回傳或討論 API Key。不得聲稱看過依法不可能取得的私密資訊。",
       "你的目標是協助自己的陣營獲勝。"
     ].join("\n");
   }
 
   private publicContext(state: GameState): string {
     const players = state.players.map((p) => `${p.id}=${p.name}[${p.alive ? "存活" : "出局"}${p.isAI ? ",AI" : ",真人"}]`).join(", ");
-    const logs = state.messages.slice(-36).map((m) => `${m.playerName}: ${m.content}`).join("\n");
+    const logs = state.messages.slice(-40).map((m) => `${m.playerName}: ${m.content}`).join("\n");
     const order = state.debateOrder.map((id) => state.players.find((p) => p.id === id)?.name ?? id).join(" → ");
     return `目前第 ${state.round} 輪，階段=${state.phase}。\n玩家：${players}\n本輪辯論順序：${order || "尚未建立"}\n公開紀錄：\n${logs}`;
   }
@@ -659,12 +647,15 @@ export class GameRoom extends DurableObject<AIEnv> {
         privateMe.witchCanHealKnownVictim = state.witchHealAvailable && (victim !== me.id || canWitchSelfSave(state.players.length, state.round));
       }
     }
+
+    const roleSetupError = validateRoleSetup(state.roleSetup, state.players.length);
     const result: PrivateView = {
       roomId: state.roomId,
       phase: state.phase,
       round: state.round,
-      maxPlayers: state.maxPlayers,
       players,
+      roleSetup: state.roleSetup,
+      canStart: !roleSetupError,
       messages: state.messages,
       me: privateMe,
       votesCast: Object.keys(state.votes),
@@ -675,8 +666,13 @@ export class GameRoom extends DurableObject<AIEnv> {
       aiVotingUnlocked: isAIVotingUnlocked(state.players, state.votes),
       lastNightDeaths: state.lastNightDeaths
     };
+    if (roleSetupError) result.roleSetupError = roleSetupError;
     const currentSpeakerId = currentDebaterId(state.debateOrder, state.debateIndex);
     if (currentSpeakerId) result.currentSpeakerId = currentSpeakerId;
+    if (me.id === state.hostPlayerId) {
+      const pendingAI = this.pendingAITask(state);
+      if (pendingAI) result.pendingAI = pendingAI;
+    }
     if (state.lastVoteEliminated) result.lastVoteEliminated = state.lastVoteEliminated;
     if (state.winner) result.winner = state.winner;
     return result;
@@ -710,21 +706,32 @@ export class GameRoom extends DurableObject<AIEnv> {
     return text;
   }
 
-  private logAIError(actor: Player, operation: string, error: unknown): void {
-    console.warn(JSON.stringify({
-      event: "ai_fallback",
-      playerId: actor.id,
-      provider: actor.ai?.provider ?? "none",
-      model: actor.ai?.model ?? "none",
-      operation,
-      error: error instanceof Error ? error.message.slice(0, 300) : "unknown"
-    }));
+  private normalizeChat(content: string): string {
+    const text = content.trim().replace(/\s+/g, " ").slice(0, 500);
+    if (text.length < 1) throw new Error("聊天訊息不能為空白");
+    return text;
+  }
+
+  private normalizeRoleSetup(raw: RoleSetup): RoleSetup {
+    const toInt = (value: unknown): number => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : -1;
+    return {
+      werewolf: toInt(raw?.werewolf),
+      villager: toInt(raw?.villager),
+      seer: toInt(raw?.seer),
+      witch: toInt(raw?.witch),
+      guard: toInt(raw?.guard)
+    };
   }
 
   private validateAIConfig(ai: AIConfig): void {
     const allowed = new Set(["openai", "gemini", "deepseek", "openai-compatible"]);
     if (!allowed.has(ai.provider)) throw new Error("AI provider 無效");
     if (!ai.model.trim() || ai.model.length > 120) throw new Error("AI model 無效");
+    if (ai.provider === "openai-compatible") {
+      if (!ai.baseUrl?.trim()) throw new Error("OpenAI-compatible Provider 必須設定 Base URL");
+      const parsed = new URL(ai.baseUrl);
+      if (parsed.protocol !== "https:") throw new Error("自訂 API Base URL 必須使用 HTTPS");
+    }
   }
 
   private newPlayer(name: string, isAI: boolean, ai?: AIConfig): Player {
@@ -787,8 +794,21 @@ export class GameRoom extends DurableObject<AIEnv> {
     };
   }
 
+  private chatMessage(state: GameState, player: Player, content: string): ChatMessage {
+    return {
+      id: crypto.randomUUID(),
+      playerId: player.id,
+      playerName: player.name,
+      content,
+      kind: "chat",
+      createdAt: Date.now(),
+      round: state.round,
+      phase: state.phase
+    };
+  }
+
   private trimMessages(state: GameState): void {
-    if (state.messages.length > 240) state.messages = state.messages.slice(-240);
+    if (state.messages.length > 400) state.messages = state.messages.slice(-400);
   }
 
   private broadcast(state: GameState): void {
@@ -809,9 +829,10 @@ export class GameRoom extends DurableObject<AIEnv> {
     const rows = this.ctx.storage.sql.exec<{ json: string }>("SELECT json FROM room_state WHERE key = 'state'").toArray();
     const row = rows[0];
     if (!row) return undefined;
-    const parsed = JSON.parse(row.json) as GameState;
-    this.stateCache = parsed;
-    return parsed;
+    const parsed = JSON.parse(row.json) as GameState & { roleSetup?: RoleSetup };
+    if (!parsed.roleSetup) parsed.roleSetup = defaultRoleSetup(parsed.players.length);
+    this.stateCache = parsed as GameState;
+    return this.stateCache;
   }
 
   private requireState(): GameState {
