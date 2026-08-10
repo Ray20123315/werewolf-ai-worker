@@ -38,8 +38,6 @@ jobs:
           set -euo pipefail
           OLD_BASE=200d31feac1b8356f4ec7d43d1379a604535c608
           CURRENT_BASE=2217649d82a86cb353be817b8241592edbe58988
-          test "$(git rev-parse HEAD^)" != "$CURRENT_BASE" || true
-          test "$(git rev-parse HEAD)" != "$CURRENT_BASE" || true
 
           paths=(
             README.md SECURITY.md .dev.vars.example package.json tsconfig.test.json wrangler.jsonc
@@ -47,7 +45,7 @@ jobs:
             public/admin.html public/admin.css public/admin.js public/index.html public/styles.css public/i18n.js public/app.js
             test/admin.test.mjs test/translation.test.mjs test/i18n-static.test.mjs test/chat-channels.test.mjs
           )
-          overlaps=(public/app.js public/i18n.js public/index.html public/styles.css test/i18n-static.test.mjs)
+          overlaps=(public/app.js public/i18n.js public/index.html test/i18n-static.test.mjs)
 
           is_overlap() {
             local p="$1"
@@ -57,7 +55,15 @@ jobs:
 
           for p in "${paths[@]}"; do
             mkdir -p "$(dirname "$p")" /tmp/merge-base/"$(dirname "$p")"
-            if is_overlap "$p"; then
+            if [[ "$p" == "public/styles.css" ]]; then
+              cat >> "$p" <<'CSS'
+
+.player-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.translation-status { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }
+.translation-status.is-error { color: #9a3412; }
+.admin-link { text-decoration: none; }
+CSS
+            elif is_overlap "$p"; then
               git show "$OLD_BASE:$p" > "/tmp/merge-base/$p"
               cp "$p" "/tmp/theirs.$(basename "$p")"
               if ! git merge-file -p "/tmp/task-target/$p" "/tmp/merge-base/$p" "/tmp/theirs.$(basename "$p")" > "/tmp/merged.$(basename "$p")"; then
