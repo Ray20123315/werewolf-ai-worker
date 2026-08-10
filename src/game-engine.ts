@@ -1,20 +1,56 @@
-import type { GameState, NightActions, Player, Role, Team, WitchAction } from "./types";
+import type { GameState, NightActions, Player, Role, RoleSetup, Team, WitchAction } from "./types";
 
-export function roleDeck(playerCount: number): Role[] {
-  if (playerCount < 5 || playerCount > 12) {
-    throw new Error("玩家人數必須介於 5 到 12 人");
-  }
-  const table: Record<number, Role[]> = {
-    5: ["werewolf", "seer", "villager", "villager", "villager"],
-    6: ["werewolf", "werewolf", "seer", "villager", "villager", "villager"],
-    7: ["werewolf", "werewolf", "seer", "villager", "villager", "villager", "villager"],
-    8: ["werewolf", "werewolf", "seer", "witch", "villager", "villager", "villager", "villager"],
-    9: ["werewolf", "werewolf", "werewolf", "seer", "witch", "villager", "villager", "villager", "villager"],
-    10: ["werewolf", "werewolf", "werewolf", "seer", "witch", "villager", "villager", "villager", "villager", "villager"],
-    11: ["werewolf", "werewolf", "werewolf", "seer", "witch", "guard", "villager", "villager", "villager", "villager", "villager"],
-    12: ["werewolf", "werewolf", "werewolf", "werewolf", "seer", "witch", "guard", "villager", "villager", "villager", "villager", "villager"]
+const SPECIAL_ROLES: readonly Role[] = ["seer", "witch", "guard"];
+
+export function defaultRoleSetup(playerCount: number): RoleSetup {
+  const count = Math.max(1, Math.trunc(playerCount));
+  const werewolf = Math.max(1, Math.floor(count / 4));
+  const seer = count >= 4 ? 1 : 0;
+  const witch = count >= 6 ? 1 : 0;
+  const guard = count >= 8 ? 1 : 0;
+  const reserved = werewolf + seer + witch + guard;
+  return {
+    werewolf,
+    villager: Math.max(0, count - reserved),
+    seer,
+    witch,
+    guard
   };
-  return [...(table[playerCount] ?? [])];
+}
+
+export function growRoleSetup(setup: RoleSetup): RoleSetup {
+  return { ...setup, villager: setup.villager + 1 };
+}
+
+export function roleSetupTotal(setup: RoleSetup): number {
+  return setup.werewolf + setup.villager + setup.seer + setup.witch + setup.guard;
+}
+
+export function validateRoleSetup(setup: RoleSetup, playerCount: number): string | undefined {
+  for (const [role, raw] of Object.entries(setup)) {
+    if (!Number.isInteger(raw) || raw < 0) return `${role} 數量必須是 0 以上整數`;
+  }
+  if (!Number.isInteger(playerCount) || playerCount < 3) return "至少需要 3 名玩家才能開始";
+  if (setup.werewolf < 1) return "至少需要 1 名狼人";
+  for (const role of SPECIAL_ROLES) {
+    if (setup[role] > 1) return `${role} 目前最多只能設定 1 名`;
+  }
+  if (roleSetupTotal(setup) !== playerCount) return `角色總數必須等於玩家數（目前 ${roleSetupTotal(setup)} / ${playerCount}）`;
+  const villageSide = playerCount - setup.werewolf;
+  if (setup.werewolf >= villageSide) return "開局時狼人數必須少於非狼人玩家數";
+  return undefined;
+}
+
+export function roleDeckFromSetup(setup: RoleSetup, playerCount: number): Role[] {
+  const error = validateRoleSetup(setup, playerCount);
+  if (error) throw new Error(error);
+  return [
+    ...Array<Role>(setup.werewolf).fill("werewolf"),
+    ...Array<Role>(setup.villager).fill("villager"),
+    ...Array<Role>(setup.seer).fill("seer"),
+    ...Array<Role>(setup.witch).fill("witch"),
+    ...Array<Role>(setup.guard).fill("guard")
+  ];
 }
 
 export function secureShuffle<T>(items: readonly T[]): T[] {
@@ -39,8 +75,8 @@ function secureRandomInt(maxExclusive: number): number {
   return buffer[0]! % maxExclusive;
 }
 
-export function assignRoles(players: Player[]): Player[] {
-  const roles = secureShuffle(roleDeck(players.length));
+export function assignRoles(players: Player[], setup: RoleSetup): Player[] {
+  const roles = secureShuffle(roleDeckFromSetup(setup, players.length));
   return players.map((player, index) => ({ ...player, role: roles[index]! }));
 }
 
@@ -59,9 +95,7 @@ export function checkWinner(players: Player[]): Team | undefined {
 
 export function pluralityTarget(votes: Record<string, string>): string | undefined {
   const counts = new Map<string, number>();
-  for (const target of Object.values(votes)) {
-    counts.set(target, (counts.get(target) ?? 0) + 1);
-  }
+  for (const target of Object.values(votes)) counts.set(target, (counts.get(target) ?? 0) + 1);
   if (counts.size === 0) return undefined;
   const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   if (ordered.length > 1 && ordered[0]![1] === ordered[1]![1]) return undefined;
@@ -84,8 +118,7 @@ export function resolveNight(
   const witchAction = firstWitchAction(state.nightActions.witchActions);
   const healed = Boolean(wolfTarget && witchAction?.type === "heal" && state.witchHealAvailable);
   const protectedByGuard = Boolean(wolfTarget && guardTarget === wolfTarget);
-  const poisonedTarget =
-    witchAction?.type === "poison" && state.witchPoisonAvailable ? witchAction.targetId : undefined;
+  const poisonedTarget = witchAction?.type === "poison" && state.witchPoisonAvailable ? witchAction.targetId : undefined;
 
   const deaths = new Set<string>();
   if (wolfTarget && !healed && !protectedByGuard) deaths.add(wolfTarget);
@@ -126,8 +159,7 @@ export function canWitchSelfSave(playerCount: number, round: number): boolean {
 }
 
 export function areNightActionsComplete(state: GameState): boolean {
-  const alive = state.players.filter((p) => p.alive);
-  for (const player of alive) {
+  for (const player of livingPlayers(state.players)) {
     if (!player.role) continue;
     if (player.role === "werewolf" && !state.nightActions.wolfVotes[player.id]) return false;
     if (player.role === "seer" && !state.nightActions.seerTargets[player.id]) return false;
@@ -136,7 +168,6 @@ export function areNightActionsComplete(state: GameState): boolean {
   }
   return true;
 }
-
 
 export function isAIVotingUnlocked(players: Player[], votes: Record<string, string>): boolean {
   const livingHumans = livingPlayers(players).filter((p) => !p.isAI);
