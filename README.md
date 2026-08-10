@@ -123,12 +123,15 @@ stateDiagram-v2
 ### 三語與即時翻譯
 
 - UI 支援 `zh-TW`（繁體中文）、`zh-CN`（简体中文）、`en`（English），選擇會保存在瀏覽器。
-- 玩家送出的聊天與正式發言保留原文，並附上發送端語系 metadata；翻譯只影響每位觀看者的顯示。
-- 若觀看者語言不同，前端透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求翻譯；翻譯失敗時顯示原文，不阻塞遊戲流程。
-- 動態角色名稱／技能說明、系統訊息、錯誤與階段文字也會依觀看者語言翻譯。
-- 翻譯端點要求有效房間 session，並限制單次筆數與總文字長度，避免成為公開無限制推論代理。
-- 翻譯改用 **Google Cloud Translation Basic v2**，不再用生成式 AI/Workers AI。部署者以 Worker Secret `GOOGLE_TRANSLATE_API_KEYS` 提供 1~8 組 Google Translation API Key；可用換行、逗號或分號分隔。
-- Google 翻譯遇到無效 Key、配額／限流或暫時性服務錯誤時會依序嘗試下一組 Key；翻譯失敗仍顯示原文，不阻塞遊戲。
+- UI、114 個角色名稱／說明、系統訊息、規則與技能文字使用 repository 內固定三語翻譯；切換語言後直接重繪，不送遠端翻譯。
+- 玩家送出的 `chat` 與 `speech` 保留原文並附發送端語系 metadata；只有觀看者語言不同時才做遠端機器翻譯。
+- 前端透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求玩家文字翻譯；翻譯失敗時顯示原文，不阻塞遊戲流程。
+- Worker 的 Google 主路徑照使用者提供的 Userscript：`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=...&dt=t&q=...`。
+- Google 尚未快速完成時，180ms 後可啟動 MyMemory 短文字備援；若 MyMemory 先回傳，再保留 140ms Google 優先等待窗。
+- MyMemory 備援只處理 UTF-8 不超過 500 bytes 的短文字。
+- 翻譯端點要求有效房間 session，並限制單次筆數與總文字長度，避免成為公開無限制翻譯代理。
+- 這條聊天翻譯鏈路不使用 Google Cloud Translation Basic v2，不需要 `GOOGLE_TRANSLATE_API_KEYS`、Google Cloud Project 或 Worker Secret，也不使用生成式 AI。
+- `translate.googleapis.com` 的 `client=gtx` 路徑不是 Google Cloud Translation 公開 API；上游若改動、限流或失效，聊天翻譯可能暫時不可用，但遊戲會保留原文繼續運作。完整規則見 `docs/I18N_POLICY.md`。
 
 ---
 
@@ -170,7 +173,8 @@ AI 正式發言同時可回傳可選的 **結構化白天技能 action**。例�
 │  ├─ ai.ts
 │  └─ types.ts
 ├─ docs/
-│  └─ ROLE_CATALOG.md
+│  ├─ ROLE_CATALOG.md
+│  └─ I18N_POLICY.md
 ├─ test/
 │  └─ game-engine.test.mjs
 ├─ .github/workflows/verify.yml
@@ -216,16 +220,10 @@ npx wrangler deploy
 
 也可使用 Cloudflare Workers Builds 連接 GitHub，Production branch 指向 `main`。
 
-本 repository 不需要部署者提供共享**遊戲 AI** API Key；遊戲 AI 仍由房主 BYOK。三語即時翻譯則使用 Google Cloud Translation Basic v2，需要部署者設定 Worker Secret：
-
-```bash
-npx wrangler secret put GOOGLE_TRANSLATE_API_KEYS
-```
-
-Secret 可填 1~8 組 Google Translation API Key，使用換行、逗號或分號分隔。不要把真實 Key 寫入 `wrangler.jsonc`、`.dev.vars.example`、Git 或 room state。
+本 repository 不需要部署者提供共享**遊戲 AI** API Key；遊戲 AI 仍由房主 BYOK。玩家聊天翻譯也不需要 Google Cloud Translation API Key 或 Worker Secret，因此不需要設定 `GOOGLE_TRANSLATE_API_KEYS`。
 
 ---
 
 ## 10. 安全
 
-請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；需要跨語言顯示的文字會送到 Google Cloud Translation Basic v2，Google Translation Key 只由 Worker Secret 提供。
+請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；只有跨語言顯示的玩家 `chat` / `speech` 文字會由 Worker 送往 Google `client=gtx` 路徑，必要時以 MyMemory 做短文字備援。固定 UI／角色／系統文字不送遠端翻譯。
