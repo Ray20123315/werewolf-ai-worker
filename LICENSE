@@ -1,0 +1,94 @@
+PROPRIETARY LICENSE — ALL RIGHTS RESERVED
+Version 1.0 — 2026-08-10
+
+Copyright © 2026 Ray20123315. All Rights Reserved.
+
+NOTICE: THIS SOFTWARE IS NOT OPEN SOURCE AND NO GENERAL LICENSE IS GRANTED.
+
+1. Ownership and Reservation of Rights
+
+All source code, object code, scripts, game logic, prompts, documentation, user-interface materials, original text, configuration, and other original materials contained in this repository (collectively, the "Software") are owned by Ray20123315 or their respective lawful owners.
+
+Except for rights that cannot lawfully be withheld, and the narrow rights that are necessarily granted by the applicable GitHub Terms of Service when this repository is made public, every right in and to the Software is expressly reserved.
+
+Possession of, access to, viewing of, downloading of, or forking of this repository does not grant any license beyond those mandatory platform rights.
+
+2. No Permission Granted
+
+Unless Ray20123315 gives prior express written permission for a specifically identified use, you may NOT, directly or indirectly:
+
+(a) use, execute, run, install, deploy, host, publish, publicly perform, or operate the Software or any substantial portion of it;
+
+(b) copy, reproduce, mirror, republish, redistribute, transmit, or otherwise provide the Software or any substantial portion of it to another person or service, except for copies made solely through functionality that GitHub is contractually required to permit for a public repository;
+
+(c) modify, adapt, translate, port, transform, merge, arrange, or create derivative works based on the Software;
+
+(d) sell, rent, lease, sublicense, assign, transfer, monetize, commercialize, or otherwise exploit the Software, whether for profit or not;
+
+(e) offer the Software, or any derivative or substantially similar implementation based on it, as a hosted service, Software-as-a-Service (SaaS), game service, API, managed service, paid feature, advertising-supported service, or other network-accessible product;
+
+(f) incorporate the Software into another product, repository, dataset, package, game, service, course, publication, or codebase;
+
+(g) remove, hide, alter, or falsify copyright notices, authorship notices, license notices, provenance information, or other rights-management information;
+
+(h) use the Software, its source code, prompts, game transcripts generated specifically for development/testing, documentation, or repository content as training data, fine-tuning data, reinforcement-learning data, synthetic-data seed material, retrieval corpus, benchmark material, evaluation data, distillation material, or other input for developing, training, evaluating, or improving an artificial-intelligence or machine-learning system;
+
+(i) reverse engineer, decompile, disassemble, reconstruct, derive implementation details from, or benchmark the Software for the purpose of producing, training, validating, or improving a competing or substantially similar product or service, except to the narrow extent that applicable law expressly makes such a restriction unenforceable;
+
+(j) use automated scraping, bulk extraction, mirroring, or collection to obtain the Software for a purpose prohibited by this License;
+
+(k) represent that Ray20123315 sponsors, endorses, certifies, authorizes, or is affiliated with your project, product, service, fork, or derivative work;
+
+(l) circumvent or attempt to circumvent technical, contractual, or access-control measures intended to enforce these restrictions; or
+
+(m) authorize, assist, induce, or enable another person to do anything prohibited by this License.
+
+3. GitHub Public-Repository Exception
+
+If this repository is public on GitHub, nothing in this License is intended to revoke or contradict the minimum rights that the repository owner is required to grant GitHub or other GitHub users under the then-applicable GitHub Terms of Service solely for use of GitHub's own service functionality, including viewing and GitHub-hosted forking where required by those terms.
+
+That platform-specific exception does NOT grant permission to deploy, execute, modify, redistribute outside the rights required by GitHub, commercialize, provide as a service, create derivative products, train AI systems on, or otherwise exploit the Software.
+
+If the repository is made private, this Section does not independently create any access or use right.
+
+4. Third-Party Material
+
+Third-party trademarks, names, external references, protocols, APIs, and any third-party material remain subject to the rights of their respective owners. This License covers only material that Ray20123315 has authority to license or restrict.
+
+References to external Werewolf/Mafia game descriptions or community posts are acknowledgements of gameplay inspiration and do not claim ownership of those third-party materials.
+
+5. Written Permission
+
+Any exception to this License must be granted in a written authorization issued by Ray20123315 that clearly identifies the recipient, permitted material, permitted purpose, scope, duration, and any additional conditions.
+
+Silence, failure to object, accepting a pull request, responding to an issue, or making the repository public does not constitute permission for any use beyond the applicable GitHub platform rights.
+
+6. Contributions
+
+External contributions are not accepted under a general inbound license. Do not submit code or other material unless you have the legal right to do so and Ray20123315 has separately agreed in writing to the contribution terms. A pull request, issue, review, comment, discussion, or other GitHub interaction does not by itself create permission to use the Software or require Ray20123315 to accept the submitted material.
+
+If Ray20123315 intends to incorporate a third-party contribution outside GitHub's platform-limited functionality, the parties should first execute a separate written assignment or license granting the rights required for that contribution.
+
+7. Unauthorized Use and Termination
+
+Any permission separately granted by Ray20123315 terminates automatically upon material breach of its conditions unless the written authorization states otherwise. Unauthorized use may constitute copyright infringement, breach of contract, or other violation depending on applicable law.
+
+8. No Warranty
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY KIND, EXPRESS, IMPLIED, OR STATUTORY, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, ACCURACY, SECURITY, AVAILABILITY, AND NON-INFRINGEMENT.
+
+9. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, RAY20123315 AND CONTRIBUTORS SHALL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR OTHER DAMAGES, OR FOR LOSS OF DATA, PROFITS, REVENUE, BUSINESS, GOODWILL, OR SERVICE AVAILABILITY, ARISING FROM OR RELATED TO THE SOFTWARE OR ANY USE OR INABILITY TO USE IT.
+
+10. No Implied Rights; Severability
+
+No right or license is granted by implication, estoppel, exhaustion, course of dealing, or otherwise except where such exclusion is prohibited by applicable law.
+
+If a provision of this License is held unenforceable, it shall be enforced to the maximum extent permitted and the remaining provisions shall remain in effect.
+
+11. Permission Requests
+
+For permission requests, contact the repository owner through the GitHub account associated with this repository and obtain express written authorization before using the Software.
+
+END OF LICENSE

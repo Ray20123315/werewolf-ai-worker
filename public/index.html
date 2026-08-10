@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#faf7f2" />
+  <title>狼人議會 — AI 辯論式狼人殺</title>
+  <meta name="description" content="部署於 Cloudflare Workers、支援 GPT、Gemini、DeepSeek 的辯論式 AI 狼人殺。" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="brandbar">
+      <div>
+        <p class="eyebrow">CLOUDFLARE WORKERS · DEBATE MODE</p>
+        <h1>狼人議會</h1>
+      </div>
+      <button id="leaveButton" class="ghost hidden" type="button">離開房間</button>
+    </header>
+
+    <section id="landing" class="landing-grid">
+      <article class="hero panel">
+        <p class="kicker">只做辯論式，不做暴民式</p>
+        <h2>先發言、再質疑、最後投票。真人與 AI 都必須把理由說出來。</h2>
+        <p class="lead">每個白天由伺服器排定正式發言順序；所有存活玩家完成一輪辯論後才開放放逐投票。房間狀態由 Durable Objects 協調，AI 金鑰只留在 Cloudflare Worker Secrets。</p>
+        <div class="facts">
+          <div><strong>5–12</strong><span>玩家</span></div>
+          <div><strong>4</strong><span>AI Provider 介面</span></div>
+          <div><strong>1</strong><span>強制辯論流程</span></div>
+        </div>
+      </article>
+
+      <div class="entry-stack">
+        <form id="createForm" class="panel form-card">
+          <div class="section-head"><span class="step">01</span><h2>建立房間</h2></div>
+          <label>你的名稱<input name="name" maxlength="24" autocomplete="nickname" required placeholder="例如：Ray" /></label>
+          <label>人數上限
+            <select name="maxPlayers">
+              <option value="8" selected>8 人</option>
+              <option value="5">5 人</option><option value="6">6 人</option><option value="7">7 人</option>
+              <option value="9">9 人</option><option value="10">10 人</option><option value="11">11 人</option><option value="12">12 人</option>
+            </select>
+          </label>
+          <button class="primary" type="submit">建立辯論房</button>
+        </form>
+
+        <form id="joinForm" class="panel form-card">
+          <div class="section-head"><span class="step">02</span><h2>加入房間</h2></div>
+          <label>房間代碼<input name="roomId" maxlength="6" required placeholder="ABC234" autocapitalize="characters" /></label>
+          <label>你的名稱<input name="name" maxlength="24" autocomplete="nickname" required placeholder="例如：Alice" /></label>
+          <button class="secondary" type="submit">加入對局</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="game" class="game-layout hidden">
+      <div class="game-main">
+        <section class="panel room-head">
+          <div>
+            <p class="eyebrow">ROOM</p>
+            <div class="room-code-row"><h2 id="roomCode">------</h2><button id="copyRoom" class="mini" type="button">複製代碼</button></div>
+          </div>
+          <div class="phase-block"><span id="phaseBadge" class="badge">大廳</span><strong id="roundLabel">等待開始</strong></div>
+          <div class="role-block"><span>你的身份</span><strong id="roleLabel">尚未分配</strong></div>
+        </section>
+
+        <section id="noticePanel" class="panel notice-panel hidden"></section>
+
+        <section class="panel action-panel">
+          <div class="section-head compact"><span class="step">ACTION</span><h2>本階段操作</h2></div>
+          <div id="actionArea" class="action-area"></div>
+        </section>
+
+        <section class="panel chat-panel">
+          <div class="section-head compact"><span class="step">RECORD</span><h2>公開辯論紀錄</h2></div>
+          <div id="messages" class="messages" aria-live="polite"></div>
+        </section>
+      </div>
+
+      <aside class="side-column">
+        <section class="panel players-panel">
+          <div class="section-head compact"><span class="step">PLAYERS</span><h2>玩家</h2></div>
+          <div id="players" class="players"></div>
+        </section>
+
+        <section id="hostPanel" class="panel host-panel hidden">
+          <div class="section-head compact"><span class="step">HOST</span><h2>房主管理</h2></div>
+          <form id="addAIForm" class="ai-form">
+            <label>AI 名稱<input name="name" maxlength="24" required placeholder="例如：Gemini 7號" /></label>
+            <label>Provider
+              <select name="provider" id="aiProvider">
+                <option value="openai">OpenAI GPT</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai-compatible">OpenAI-compatible</option>
+              </select>
+            </label>
+            <label>Model<input name="model" id="aiModel" required value="gpt-5.6-luna" /></label>
+            <button class="secondary" type="submit">加入 AI 玩家</button>
+          </form>
+          <button id="startButton" class="primary full" type="button">開始辯論式遊戲</button>
+          <p class="hint">AI 必須依照發言順位參與辯論；若 Provider Secret 尚未設定，會使用本地規則策略，不阻塞對局。</p>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
