@@ -8,6 +8,7 @@
       edge: "屠邊：民邊或神邊任一邊全滅",
       all: "屠城：所有非狼人對手全滅",
       winHelp: "屠邊較快：初始存在的村民邊或神職邊任一邊被清空，狼人即勝。屠城較嚴格：所有非狼人對手都必須出局。",
+      sheriffHelp: "警長有 2 張放逐票，可投同一人，也可拆投給不同玩家。",
       sheriffSecond: "警長第 2 張放逐票",
       aiRunning: "AI 正在自動執行",
       wolfLeader: "本夜狼刀主控"
@@ -17,6 +18,7 @@
       edge: "屠边：民边或神边任一边全灭",
       all: "屠城：所有非狼人对手全灭",
       winHelp: "屠边较快：初始存在的村民边或神职边任一边被清空，狼人即胜。屠城较严格：所有非狼人对手都必须出局。",
+      sheriffHelp: "警长有 2 张放逐票，可投同一人，也可拆投给不同玩家。",
       sheriffSecond: "警长第 2 张放逐票",
       aiRunning: "AI 正在自动执行",
       wolfLeader: "本夜狼刀主控"
@@ -26,6 +28,7 @@
       edge: "Edge elimination: wipe civilians or gods",
       all: "Full elimination: wipe every non-werewolf opponent",
       winHelp: "Edge elimination is faster: wolves win when an initially present civilian or god edge is wiped out. Full elimination requires every non-werewolf opponent to be eliminated.",
+      sheriffHelp: "The sheriff has 2 exile ballots. They may target the same player or be split between two players.",
       sheriffSecond: "Sheriff ballot 2",
       aiRunning: "AI action running automatically",
       wolfLeader: "Wolf kill leader tonight"
@@ -90,6 +93,12 @@
   function ensureWinConditionControl() {
     const form = document.querySelector("#settingsForm");
     if (!form) return;
+    const sheriffToggle = form.querySelector('input[name="sheriffEnabled"]');
+    const sheriffHelp = sheriffToggle?.closest("label")?.nextElementSibling;
+    if (sheriffHelp?.classList.contains("field-help") && sheriffHelp.textContent !== text("sheriffHelp")) {
+      sheriffHelp.textContent = text("sheriffHelp");
+      sheriffHelp.setAttribute("data-no-translate", "");
+    }
     let row = document.querySelector("#winConditionRow");
     if (!row) {
       row = document.createElement("label");
