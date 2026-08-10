@@ -80,6 +80,13 @@
     showToast.timer = setTimeout(() => toast.classList.add("hidden"), 4200);
   }
 
+  function suppressManualAIApproval() {
+    const box = document.querySelector("#pendingAIBox");
+    if (!box) return;
+    const button = box.querySelector("#runAIButton");
+    if (button) button.remove();
+  }
+
   function applyDeepSeekDefault() {
     const provider = document.querySelector("#aiProvider");
     const model = document.querySelector("#aiModel");
@@ -156,6 +163,7 @@
         ensureWinConditionControl();
         syncSheriffVoteUi();
         syncWolfLeaderHint();
+        suppressManualAIApproval();
         scheduleAI();
       } catch {}
     });
@@ -294,7 +302,13 @@
     syncWolfLeaderHint();
   }).observe(actionArea, { childList: true, subtree: true });
 
+  const pendingAIBox = document.querySelector("#pendingAIBox");
+  if (pendingAIBox) new MutationObserver(() => {
+    suppressManualAIApproval();
+  }).observe(pendingAIBox, { childList: true, subtree: true });
+
   applyDeepSeekDefault();
   ensureWinConditionControl();
+  suppressManualAIApproval();
   connect();
 })();
