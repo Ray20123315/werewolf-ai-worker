@@ -124,7 +124,7 @@ export class GameRoom extends DurableObject<AIEnv> {
     if (!player) return new Response("Unauthorized", { status: 401 });
 
     const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ playerId: player.id, token: player.token } satisfies SocketAttachment);
     server.send(JSON.stringify({ type: "state", state: this.projectState(state, player.token) } satisfies ServerMessage));
@@ -132,7 +132,7 @@ export class GameRoom extends DurableObject<AIEnv> {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    const attachment = ws.deserializeAttachment<SocketAttachment>();
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (!attachment) {
       ws.send(JSON.stringify({ type: "error", message: "連線身份遺失，請重新整理。" } satisfies ServerMessage));
       ws.close(1008, "Missing identity");
@@ -793,7 +793,7 @@ export class GameRoom extends DurableObject<AIEnv> {
 
   private broadcast(state: GameState): void {
     for (const ws of this.ctx.getWebSockets()) {
-      const attachment = ws.deserializeAttachment<SocketAttachment>();
+      const attachment = ws.deserializeAttachment() as SocketAttachment | null;
       if (!attachment) continue;
       try {
         const payload: ServerMessage = { type: "state", state: this.projectState(state, attachment.token) };
