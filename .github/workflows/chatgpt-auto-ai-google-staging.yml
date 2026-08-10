@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .chatgpt_auto_google_payload/chunk-* > /tmp/payload.b64
+          cat .chatgpt_auto_google_payload/chunk-00 .chatgpt_auto_google_payload/chunk-01 .chatgpt_auto_google_payload/chunk-02 .chatgpt_auto_google_payload/chunk-03 .chatgpt_auto_google_payload/chunk-04 .chatgpt_auto_google_payload/chunk-05 .chatgpt_auto_google_payload/chunk-06a .chatgpt_auto_google_payload/chunk-06b1 .chatgpt_auto_google_payload/chunk-06b2 .chatgpt_auto_google_payload/chunk-07 > /tmp/payload.b64
           base64 -d /tmp/payload.b64 > /tmp/payload.tar.xz
           echo 'bc6521af9c94c87dd4c18f0c1e2e1ea2c586a45b789ddf3983619cc7a8bbb7ec  /tmp/payload.tar.xz' | sha256sum -c -
           mkdir /tmp/payload
