@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+.wrangler-dry-run/
+dist/
+coverage/
+.dev.vars
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+worker-configuration.d.ts
