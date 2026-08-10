@@ -12,6 +12,7 @@ const publicScripts = [
   "../public/ui-fixes.js",
   "../public/chat-channels.js",
   "../public/ai-form.js",
+  "../public/house-rules.js",
   "../public/admin.js"
 ];
 
@@ -28,19 +29,22 @@ test("browser JavaScript files pass syntax checks", () => {
 });
 
 test("no runtime helper replaces the game's native WebSocket constructor", () => {
-  for (const relative of ["../public/ui-fixes.js", "../public/chat-channels.js", "../public/ai-form.js"]) {
+  for (const relative of ["../public/ui-fixes.js", "../public/chat-channels.js", "../public/ai-form.js", "../public/house-rules.js"]) {
     const js = source(relative);
     assert.doesNotMatch(js, /window\.WebSocket\s*=/, relative);
     assert.doesNotMatch(js, /extends\s+NativeWebSocket/, relative);
   }
   const channels = source("../public/chat-channels.js");
+  const house = source("../public/house-rules.js");
   assert.match(channels, /channelSocket\s*=\s*socket/);
   assert.match(channels, /const socket = new WebSocket\(/);
+  assert.match(house, /const ws = new WebSocket\(/);
 });
 
 test("start-game DOM observers cannot self-trigger an infinite disabled or childList loop", () => {
   const channels = source("../public/chat-channels.js");
   const ui = source("../public/ui-fixes.js");
+  const house = source("../public/house-rules.js");
 
   assert.match(channels, /if \(element && element\.disabled !== disabled\) element\.disabled = disabled/);
   assert.match(channels, /attributeFilter: \["disabled"\]/);
@@ -50,6 +54,11 @@ test("start-game DOM observers cannot self-trigger an infinite disabled or child
   assert.match(ui, /dialogObserver\?\.disconnect\(\)/);
   assert.match(ui, /finally \{\s*observeRuntime\(\);\s*\}/s);
   assert.match(ui, /if \(button\.textContent !== symbol\) button\.textContent = symbol/);
+
+  assert.doesNotMatch(house, /old\?\.remove\(\);\s*if \(latestState\?\.phase !== "night"/s);
+  assert.match(house, /if \(!hint\) \{[\s\S]*area\.prepend\(hint\);[\s\S]*\}/);
+  assert.match(house, /if \(title && title\.textContent !== text\("wolfLeader"\)\) title\.textContent = text\("wolfLeader"\)/);
+  assert.match(house, /if \(name && name\.textContent !== leader\.name\) name\.textContent = leader\.name/);
 });
 
 test("AI bulk join keeps the page and form state while storing keys for every created AI", () => {
@@ -61,7 +70,7 @@ test("AI bulk join keeps the page and form state while storing keys for every cr
   assert.match(html, /name="count"[^>]*min="1"[^>]*max="100"[^>]*value="1"/);
   assert.match(html, /id="aiNameBaseLabel"/);
   assert.match(html, /id="aiBatchHint"/);
-  assert.match(html, /<script src="\/ai-form\.js"><\/script>\s*<script type="module" src="\/app\.js"><\/script>/s);
+  assert.match(html, /<script src="\/ai-form\.js"><\/script>\s*<script src="\/house-rules\.js"><\/script>\s*<script type="module" src="\/app\.js"><\/script>/s);
 
   assert.match(ai, /const BATCH_MAX = 100/);
   assert.match(ai, /Array\.from\(\{ length: count \}, \(_, index\) => normalizeName\(`\$\{base\}\$\{index \+ 1\}`\)\)/);
@@ -91,6 +100,22 @@ test("AI bulk form owns fixed zh-TW, zh-CN, and en labels", () => {
   assert.match(ai, /nameBase: "AI 名称前缀"/);
   assert.match(ai, /nameBase: "AI name prefix"/);
   assert.match(ai, /languageSelect/);
+});
+
+test("house-rule client defaults to DeepSeek, auto-runs BYOK tasks, and supports split sheriff ballots", () => {
+  const house = source("../public/house-rules.js");
+  const html = source("../public/index.html");
+
+  assert.match(html, /<option value="deepseek" selected>DeepSeek<\/option>/);
+  assert.match(html, /id="aiModel"[^>]*value="deepseek-v4-flash"/);
+  assert.match(house, /provider\.value = "deepseek"/);
+  assert.match(house, /model\.value = "deepseek-v4-flash"/);
+  assert.match(house, /aiTimer = setTimeout\(\(\) => runPendingAI\(signature, keys\), 650\)/);
+  assert.match(house, /lastFailedAt < 8000/);
+  assert.match(house, /id = "sheriffVoteTarget2"/);
+  assert.match(house, /targetId: `\$\{first\}\|\$\{second\}`/);
+  assert.match(house, /slaughter_edge/);
+  assert.match(house, /slaughter_all/);
 });
 
 test("fixed game translation stays local while player chat keeps the native remote path", () => {

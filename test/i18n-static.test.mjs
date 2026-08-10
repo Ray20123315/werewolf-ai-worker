@@ -29,9 +29,10 @@ test("browser locale normalization keeps zh-TW zh-CN and en separate", () => {
   assert.equal(normalizeLocale("en-US"), "en");
 });
 
-test("page exposes three-language UI, automatic role setup, and multi-key AI BYOK", () => {
+test("page exposes three-language UI, automatic role setup, multi-key AI BYOK, and split sheriff copy", () => {
   const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const house = readFileSync(new URL("../public/house-rules.js", import.meta.url), "utf8");
   assert.match(html, /id="languageSelect"/);
   assert.match(html, /value="zh-TW"/);
   assert.match(html, /value="zh-CN"/);
@@ -39,7 +40,10 @@ test("page exposes three-language UI, automatic role setup, and multi-key AI BYO
   assert.match(html, /id="autoRoleSetup"/);
   assert.match(html, /textarea name="apiKeys"/);
   assert.match(html, /value="random_elimination"/);
-  assert.match(html, /警長的放逐票計為 2 票。/);
+  assert.match(html, /警長有 2 張放逐票，可投同一人，也可拆投給不同玩家。/);
+  assert.match(house, /sheriffHelp: "警長有 2 張放逐票，可投同一人，也可拆投給不同玩家。"/);
+  assert.match(house, /sheriffHelp: "警长有 2 张放逐票，可投同一人，也可拆投给不同玩家。"/);
+  assert.match(house, /The sheriff has 2 exile ballots/);
   assert.match(html, /id="confirmDialog"/);
   assert.match(html, /id="confirmDialogDontShow"/);
   assert.match(html, /\/game-i18n\.js/);
