@@ -1,4 +1,5 @@
 import { playerFaction } from "./game-engine.js";
+import { installHouseRules } from "./house-rules.js";
 import type { ChatMessage, GameState, Player } from "./types.js";
 
 type ChatChannel = "public" | "werewolf" | "lovers";
@@ -54,11 +55,13 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
     const base = originalPrivateContext.call(this, state, actor) as string;
     const secret = (state.messages as RuntimeMessage[])
       .filter((message) => message.channel && message.channel !== "public" && canViewMessage(actor.id, message))
-      .slice(-20)
+      .slice(-12)
       .map((message) => `${message.channel === "werewolf" ? "狼人密聊" : "情侶密聊"}｜${message.playerName}: ${message.content}`)
       .join("\n");
     return secret ? `${base}\n依法可見的秘密聊天：\n${secret}` : base;
   };
+
+  installHouseRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
