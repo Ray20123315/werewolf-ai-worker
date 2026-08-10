@@ -31,7 +31,8 @@ jobs:
             .chatgpt_translation_admin_payload/04 \
             .chatgpt_translation_admin_payload/05 \
             .chatgpt_translation_admin_payload/06 \
-            .chatgpt_translation_admin_payload/07 \
+            .chatgpt_translation_admin_payload/07a \
+            .chatgpt_translation_admin_payload/07b \
             .chatgpt_translation_admin_payload/08 \
             .chatgpt_translation_admin_payload/09 \
             .chatgpt_translation_admin_payload/10 > /tmp/payload.b64
