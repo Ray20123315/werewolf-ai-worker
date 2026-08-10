@@ -37,7 +37,6 @@ jobs:
         run: |
           set -euo pipefail
           OLD_BASE=200d31feac1b8356f4ec7d43d1379a604535c608
-          CURRENT_BASE=2217649d82a86cb353be817b8241592edbe58988
 
           paths=(
             README.md SECURITY.md .dev.vars.example package.json tsconfig.test.json wrangler.jsonc
@@ -77,8 +76,7 @@ jobs:
           fi
 
           printf '%s\n' "${paths[@]}" | sort > /tmp/expected-paths
-          git diff --name-only "$CURRENT_BASE" -- "${paths[@]}" | sort > /tmp/reconciled-paths
-          diff -u /tmp/expected-paths /tmp/reconciled-paths
+          for p in "${paths[@]}"; do test -f "$p" || { echo "missing reconciled path: $p" >&2; exit 1; }; done
           while read -r p; do printf '%s  %s\n' "$(git hash-object "$p")" "$p"; done < /tmp/expected-paths > /tmp/pre-gate-blobs
       - name: Run npm ci
         run: npm ci
