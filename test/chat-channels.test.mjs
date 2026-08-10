@@ -23,6 +23,9 @@ class FakeRoom {
   privateContext(state, actor) { return `${this.publicContext(state)}::${actor.id}`; }
 }
 
+// This unit fake validates chat-channel isolation only. House-rule behavior has
+// separate engine/browser regression coverage and needs a full GameRoom shape.
+FakeRoom.prototype.__houseRulesInstalled = true;
 installChatChannels(FakeRoom);
 
 function baseState() {
