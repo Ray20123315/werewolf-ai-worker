@@ -18,10 +18,12 @@ import {
   growRoleSetup,
   isAIVotingUnlocked,
   isDebateComplete,
+  needsNightAction,
   pluralityTarget,
   randomTopVoteTarget,
   resolveNight,
   roleDeckFromSetup,
+  sheriffSecondVoteKey,
   topWeightedVoteTargets,
   validateRoleSetup,
   weightedVoteCounts
@@ -34,7 +36,7 @@ function p(id, role, alive = true, isAI = false, extra = {}) {
 function baseState(players, votes = {}) {
   return {
     roomId: "ABC234", hostPlayerId: players[0]?.id ?? "", phase: "vote", round: 1, players,
-    roleSetup: {}, settings: { sheriffEnabled: false, deathInfo: "names", tieRule: "no_elimination" },
+    roleSetup: {}, settings: { sheriffEnabled: false, deathInfo: "names", tieRule: "no_elimination", autoRoleSetup: false },
     sheriff: { enabled: false, electionRound: 0, candidates: [], votes: {}, successors: [] },
     messages: [], votes, nightActions: freshNightActions(), roleMemory: {}, seerResults: {}, roleResults: {},
     witchHealAvailable: true, witchPoisonAvailable: true, guardLastTargets: {}, debateOrder: [], debateIndex: 0,
@@ -64,23 +66,31 @@ test("every registry action effect is wired into the server resolver or a core a
   }
 });
 
-test("default role setup enables every registered role exactly once", () => {
-  const setup = defaultRoleSetup(30);
-  assert.equal(Object.values(setup).reduce((sum, value) => sum + value, 0), ROLE_LIST.length);
-  for (const role of ROLE_LIST) assert.equal(setup[role.id], 1, `${role.id} should default to one copy`);
-  assert.equal(validateRoleSetup(setup, 30), undefined);
+test("automatic role setup creates a sane basic board instead of randomly cropping all 114 roles", () => {
+  const setup = defaultRoleSetup(10);
+  assert.equal(Object.values(setup).reduce((sum, value) => sum + value, 0), 10);
+  assert.equal(setup.werewolf, 3);
+  assert.equal(setup.seer, 1);
+  assert.equal(setup.witch, 1);
+  assert.equal(setup.hunter, 1);
+  assert.equal(setup.guard, 1);
+  assert.equal(setup.villager, 3);
+  assert.equal(setup.black_wolf_king, undefined);
+  assert.equal(validateRoleSetup(setup, 10), undefined);
 });
 
-test("joining more players does not inflate any default role count", () => {
-  const setup = defaultRoleSetup(3);
+test("growing a manual board adds one villager without inflating every role", () => {
+  const setup = { werewolf: 2, villager: 2, seer: 1, witch: 1 };
   const grown = growRoleSetup(setup);
   assert.notEqual(grown, setup);
-  assert.deepEqual(grown, setup);
-  for (const role of ROLE_LIST) assert.equal(grown[role.id], 1);
+  assert.equal(grown.villager, 3);
+  assert.equal(grown.werewolf, 2);
+  assert.equal(grown.seer, 1);
+  assert.equal(grown.witch, 1);
 });
 
 test("oversized role pools are cropped to player count with at least one wolf and strict wolf minority", () => {
-  const setup = defaultRoleSetup(30);
+  const setup = Object.fromEntries(ROLE_LIST.map((role) => [role.id, 1]));
   for (let i = 0; i < 64; i += 1) {
     const deck = roleDeckFromSetup(setup, 30);
     const wolves = deck.filter((role) => roleDefinition(role).faction === "werewolf").length;
@@ -124,8 +134,27 @@ test("spirits take the endgame when wolves are gone but a spirit survives", () =
   assert.equal(checkWinner([p("v", "villager"), p("s", "wraith")]), "spirit");
 });
 
-test("wolves win at parity", () => {
-  assert.equal(checkWinner([p("w", "werewolf"), p("v", "villager")]), "werewolf");
+test("slaughter-edge mode does not award the old parity win while both village edges survive", () => {
+  const players = [p("w1", "werewolf"), p("w2", "werewolf"), p("v", "villager"), p("g", "seer")];
+  assert.equal(checkWinner(players), undefined);
+});
+
+test("slaughter-edge wolves win when an initially present civilian edge is wiped", () => {
+  const players = [p("w", "werewolf"), p("v", "villager", false), p("g", "seer")];
+  assert.equal(checkWinner(players), "werewolf");
+});
+
+test("slaughter-edge wolves win when an initially present god edge is wiped", () => {
+  const players = [p("w", "werewolf"), p("v", "villager"), p("g", "seer", false)];
+  assert.equal(checkWinner(players), "werewolf");
+});
+
+test("slaughter-all wolves must eliminate every non-werewolf opponent", () => {
+  const players = [p("w", "werewolf"), p("v", "villager")];
+  players.__winConditionMode = "slaughter_all";
+  assert.equal(checkWinner(players), undefined);
+  players[1].alive = false;
+  assert.equal(checkWinner(players), "werewolf");
 });
 
 test("blood wins when every survivor has blood allegiance", () => {
@@ -159,13 +188,27 @@ test("weighted voting supports zero-weight and PK top target detection", () => {
   assert.deepEqual(new Set(topWeightedVoteTargets(state)), new Set(["v", "w"]));
 });
 
-test("sheriff exile vote counts as two and stacks with role vote bonuses", () => {
-  const state = baseState([p("s", "villager"), p("v", "villager"), p("w", "werewolf")], { s: "w", v: "w", w: "v" });
+test("sheriff owns two independent exile ballots and may split them", () => {
+  const second = sheriffSecondVoteKey("s");
+  const state = baseState([p("s", "villager"), p("v", "villager"), p("w", "werewolf")], { s: "w", [second]: "v", v: "w", w: "v" });
   state.sheriff.enabled = true;
   state.sheriff.sheriffId = "s";
+  assert.deepEqual(weightedVoteCounts(state), { w: 2, v: 2 });
+
+  state.votes[second] = "w";
   assert.deepEqual(weightedVoteCounts(state), { w: 3, v: 1 });
+
   state.roleMemory.s = { voteBonus: 2 };
   assert.deepEqual(weightedVoteCounts(state), { w: 5, v: 1 });
+});
+
+test("vote completion waits for the sheriff second ballot", () => {
+  const players = [p("s", "villager"), p("w", "werewolf")];
+  const state = baseState(players, { s: "w", w: "s" });
+  state.sheriff.sheriffId = "s";
+  assert.equal(areVotesComplete(state), false);
+  state.votes[sheriffSecondVoteKey("s")] = "w";
+  assert.equal(areVotesComplete(state), true);
 });
 
 test("guard prevents a wolf kill", () => {
@@ -206,11 +249,46 @@ test("witch poison adds a second death", () => {
   assert.deepEqual(new Set(result.deaths), new Set(["v", "x"]));
 });
 
+test("one witch submission cannot resolve heal and poison in the same night", () => {
+  const result = resolveNight({
+    players: [],
+    nightActions: { wolfVotes: { w1: "v" }, seerTargets: {}, guardTargets: {}, witchActions: { witch: { type: "heal", targetId: "x" } }, roleActions: {} },
+    witchHealAvailable: true,
+    witchPoisonAvailable: true
+  });
+  assert.equal(result.healed, true);
+  assert.equal(result.poisonedTarget, undefined);
+  assert.deepEqual(result.deaths, []);
+});
+
 test("witch self-save rule remains stable for larger rooms", () => {
   assert.equal(canWitchSelfSave(10, 1), true);
   assert.equal(canWitchSelfSave(10, 2), false);
   assert.equal(canWitchSelfSave(11, 1), false);
   assert.equal(canWitchSelfSave(30, 1), false);
+});
+
+test("only the designated wolf leader needs an ordinary wolf kill submission", () => {
+  const w1 = p("w1", "werewolf");
+  const w2 = p("w2", "werewolf");
+  const v = p("v", "villager");
+  const state = baseState([w1, w2, v]);
+  state.phase = "night";
+  state.roleMemory.__system = { wolfLeaderId: "w1" };
+  assert.equal(needsNightAction(state, w1), true);
+  assert.equal(needsNightAction(state, w2), false);
+});
+
+test("a non-leader wolf still has to submit its own special night skill", () => {
+  const leader = p("leader", "werewolf");
+  const special = p("special", "shapeshifter_wolf");
+  const v = p("v", "villager");
+  const state = baseState([leader, special, v]);
+  state.phase = "night";
+  state.roleMemory.__system = { wolfLeaderId: "leader" };
+  assert.equal(needsNightAction(state, special), true);
+  state.nightActions.roleActions.special = { effect: "disguise_as_target", targetIds: ["v"], submittedAt: 1 };
+  assert.equal(needsNightAction(state, special), false);
 });
 
 test("debate order contains living players but skips captain formal speech", () => {
@@ -240,7 +318,7 @@ test("AI can vote immediately when no living humans remain", () => {
   assert.equal(isAIVotingUnlocked(players, {}), true);
 });
 
-test("vote completion only requires living formal players", () => {
+test("vote completion only requires living formal players when there is no living sheriff", () => {
   const state = baseState([p("a", "villager"), p("b", "werewolf", false)], { a: "b" });
   assert.equal(areVotesComplete(state), true);
 });
@@ -254,6 +332,7 @@ test("player password verifier never stores plaintext and authenticates correctl
   const verifier = await createPasswordVerifier("1234");
   assert.notEqual(verifier.hash, "1234");
   assert.equal(verifier.salt.length, 32);
+  assert.equal(await verifyPassword("1234"), false);
   assert.equal(await verifyPassword("1234", verifier), true);
   assert.equal(await verifyPassword("9999", verifier), false);
 });
