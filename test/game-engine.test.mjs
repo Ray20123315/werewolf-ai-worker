@@ -15,6 +15,7 @@ import {
   currentDebaterId,
   defaultRoleSetup,
   freshNightActions,
+  growRoleSetup,
   isAIVotingUnlocked,
   isDebateComplete,
   pluralityTarget,
@@ -63,11 +64,30 @@ test("every registry action effect is wired into the server resolver or a core a
   }
 });
 
-test("default role setup scales beyond the old 12-player cap", () => {
+test("default role setup enables every registered role exactly once", () => {
   const setup = defaultRoleSetup(30);
-  assert.equal(Object.values(setup).reduce((sum, value) => sum + value, 0), 30);
+  assert.equal(Object.values(setup).reduce((sum, value) => sum + value, 0), ROLE_LIST.length);
+  for (const role of ROLE_LIST) assert.equal(setup[role.id], 1, `${role.id} should default to one copy`);
   assert.equal(validateRoleSetup(setup, 30), undefined);
-  assert.equal(roleDeckFromSetup(setup, 30).length, 30);
+});
+
+test("joining more players does not inflate any default role count", () => {
+  const setup = defaultRoleSetup(3);
+  const grown = growRoleSetup(setup);
+  assert.notEqual(grown, setup);
+  assert.deepEqual(grown, setup);
+  for (const role of ROLE_LIST) assert.equal(grown[role.id], 1);
+});
+
+test("oversized role pools are cropped to player count with at least one wolf and strict wolf minority", () => {
+  const setup = defaultRoleSetup(30);
+  for (let i = 0; i < 64; i += 1) {
+    const deck = roleDeckFromSetup(setup, 30);
+    const wolves = deck.filter((role) => roleDefinition(role).faction === "werewolf").length;
+    assert.equal(deck.length, 30);
+    assert.ok(wolves >= 1);
+    assert.ok(wolves < deck.length - wolves);
+  }
 });
 
 test("custom role setup accepts duplicated roles when counts match", () => {
@@ -79,9 +99,21 @@ test("custom role setup accepts duplicated roles when counts match", () => {
   assert.equal(deck.filter((role) => role === "guard").length, 2);
 });
 
-test("role setup rejects invalid totals and unsafe starting parity", () => {
+test("custom oversized pools skip roles while preserving wolf safety", () => {
+  const setup = { werewolf: 8, villager: 8, seer: 4 };
+  assert.equal(validateRoleSetup(setup, 5), undefined);
+  for (let i = 0; i < 64; i += 1) {
+    const deck = roleDeckFromSetup(setup, 5);
+    const wolves = deck.filter((role) => role === "werewolf").length;
+    assert.equal(deck.length, 5);
+    assert.ok(wolves >= 1 && wolves <= 2);
+    assert.ok(deck.every((role) => ["werewolf", "villager", "seer"].includes(role)));
+  }
+});
+
+test("role setup rejects insufficient pools and pools that cannot preserve a wolf minority", () => {
   assert.match(validateRoleSetup({ werewolf: 1, villager: 1 }, 3) ?? "", /角色總數/);
-  assert.match(validateRoleSetup({ werewolf: 2, villager: 2 }, 4) ?? "", /少於其他玩家/);
+  assert.match(validateRoleSetup({ werewolf: 3, villager: 1 }, 4) ?? "", /非狼人陣營角色不足/);
 });
 
 test("village wins when no wolves or spirits remain", () => {
