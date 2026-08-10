@@ -112,12 +112,17 @@
       });
     }
     const select = document.querySelector("#winConditionSelect");
-    document.querySelector("#winConditionLabel").textContent = text("winLabel");
-    select.options[0].textContent = text("edge");
-    select.options[1].textContent = text("all");
-    document.querySelector("#winConditionHelp").textContent = text("winHelp");
-    if (latestState?.settings?.winCondition) select.value = latestState.settings.winCondition;
-    select.disabled = latestState ? latestState.phase !== "lobby" || !latestState.me?.isHost : false;
+    const label = document.querySelector("#winConditionLabel");
+    const help = document.querySelector("#winConditionHelp");
+    if (label && label.textContent !== text("winLabel")) label.textContent = text("winLabel");
+    if (select?.options?.[0] && select.options[0].textContent !== text("edge")) select.options[0].textContent = text("edge");
+    if (select?.options?.[1] && select.options[1].textContent !== text("all")) select.options[1].textContent = text("all");
+    if (help && help.textContent !== text("winHelp")) help.textContent = text("winHelp");
+    if (select && latestState?.settings?.winCondition && select.value !== latestState.settings.winCondition) select.value = latestState.settings.winCondition;
+    if (select) {
+      const disabled = latestState ? latestState.phase !== "lobby" || !latestState.me?.isHost : false;
+      if (select.disabled !== disabled) select.disabled = disabled;
+    }
   }
 
   function sendCommand(command) {
@@ -215,28 +220,38 @@
       label.append(span, second);
       button.parentElement?.insertBefore(label, button);
     } else {
-      second.previousElementSibling && (second.previousElementSibling.textContent = text("sheriffSecond"));
+      const label = document.querySelector("#sheriffVoteTarget2Label > span");
+      if (label && label.textContent !== text("sheriffSecond")) label.textContent = text("sheriffSecond");
     }
   }
 
   function syncWolfLeaderHint() {
-    const old = document.querySelector("#wolfLeaderHint");
-    old?.remove();
-    if (latestState?.phase !== "night" || !latestState.me?.wolfLeaderId) return;
-    const leader = latestState.players?.find((p) => p.id === latestState.me.wolfLeaderId);
-    if (!leader) return;
+    let hint = document.querySelector("#wolfLeaderHint");
+    const leaderId = latestState?.phase === "night" ? latestState.me?.wolfLeaderId : undefined;
+    const leader = leaderId ? latestState.players?.find((p) => p.id === leaderId) : undefined;
+    if (!leader) {
+      hint?.remove();
+      return;
+    }
     const area = document.querySelector("#actionArea");
     if (!area) return;
-    const hint = document.createElement("div");
-    hint.id = "wolfLeaderHint";
-    hint.className = "intel-card";
-    hint.dataset.noTranslate = "";
-    hint.innerHTML = `<strong>${text("wolfLeader")}</strong><p data-no-translate>${escapeHtml(leader.name)}</p>`;
-    area.prepend(hint);
-  }
-
-  function escapeHtml(value) {
-    return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.id = "wolfLeaderHint";
+      hint.className = "intel-card";
+      hint.dataset.noTranslate = "";
+      const title = document.createElement("strong");
+      title.dataset.wolfLeaderTitle = "1";
+      const name = document.createElement("p");
+      name.dataset.noTranslate = "";
+      name.dataset.wolfLeaderName = "1";
+      hint.append(title, name);
+      area.prepend(hint);
+    }
+    const title = hint.querySelector("[data-wolf-leader-title]");
+    const name = hint.querySelector("[data-wolf-leader-name]");
+    if (title && title.textContent !== text("wolfLeader")) title.textContent = text("wolfLeader");
+    if (name && name.textContent !== leader.name) name.textContent = leader.name;
   }
 
   document.addEventListener("click", (event) => {
