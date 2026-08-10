@@ -118,6 +118,19 @@ test("house-rule client defaults to DeepSeek, auto-runs BYOK tasks, and supports
   assert.match(house, /slaughter_all/);
 });
 
+test("AI pending tasks auto-run without a per-action human approval gate", () => {
+  const house = source("../public/house-rules.js");
+
+  assert.match(house, /function suppressManualAIApproval\(\)/);
+  assert.match(house, /box\.querySelector\("#runAIButton"\)/);
+  assert.match(house, /if \(button\) button\.remove\(\)/);
+  assert.match(house, /const pendingAIBox = document\.querySelector\("#pendingAIBox"\)/);
+  assert.match(house, /new MutationObserver\(\(\) => \{\s*suppressManualAIApproval\(\);\s*\}\)\.observe\(pendingAIBox, \{ childList: true, subtree: true \}\)/s);
+  assert.match(house, /fetch\(`\/api\/rooms\/\$\{roomId\}\/ai\/run`/);
+  assert.doesNotMatch(house, /\bconfirm\s*\(/);
+  assert.doesNotMatch(house, /\bprompt\s*\(/);
+});
+
 test("fixed game translation stays local while player chat keeps the native remote path", () => {
   const ui = source("../public/ui-fixes.js");
   assert.match(ui, /if \(body\?\.sourceLocale\) return Promise\.resolve\(localTranslationResponse\(body\)\)/);
