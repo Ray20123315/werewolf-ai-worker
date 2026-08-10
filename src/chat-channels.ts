@@ -1,12 +1,10 @@
 import { playerFaction } from "./game-engine";
-import type { AppLocale, GameState, Player } from "./types";
+import type { AppLocale, ChatMessage, GameState, Player } from "./types";
 
 type ChatChannel = "public" | "werewolf" | "lovers";
-type RuntimeMessage = {
+type RuntimeMessage = ChatMessage & {
   channel?: ChatChannel;
   audienceIds?: string[];
-  playerName: string;
-  content: string;
 };
 type RoomPrototype = Record<string, any> & { __chatChannelsInstalled?: boolean };
 
