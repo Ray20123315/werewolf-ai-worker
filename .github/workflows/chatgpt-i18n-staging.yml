@@ -2,8 +2,7 @@ name: chatgpt-i18n-staging
 
 on:
   push:
-    branches:
-      - chatgpt-i18n-live-translation-v1
+    branches: [chatgpt-i18n-live-translation-v1]
 
 permissions:
   contents: write
@@ -21,42 +20,35 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Reconstruct verified payload
+      - name: Reconstruct and verify exact payload
         shell: bash
         run: |
           set -euo pipefail
           cat .chatgpt_i18n_payload/chunk-* > /tmp/payload.b64
           base64 -d /tmp/payload.b64 > /tmp/payload.tar.xz
           echo 'b7a030349c0aa944efde211a4f2a4eda7ee22595d3bf8c54b4521ba971d39d5e  /tmp/payload.tar.xz' | sha256sum -c -
-          mkdir /tmp/payload
+          mkdir -p /tmp/payload
           tar -xJf /tmp/payload.tar.xz -C /tmp/payload
-
-      - name: Verify exact source blobs before copy
-        shell: bash
-        run: |
-          set -euo pipefail
-          check_blob() {
-            local expected="$1"
-            local path="$2"
-            local actual
+          while read -r expected path; do
             actual="$(git hash-object "/tmp/payload/$path")"
             test "$actual" = "$expected" || { echo "hash mismatch: $path expected=$expected actual=$actual" >&2; exit 1; }
-          }
-          check_blob 163aad80cc076f0c00fc1922b22daa519fd4c297 README.md
-          check_blob a84e320db05d44a92b71ededa6dd83c0b85b26e8 SECURITY.md
-          check_blob e8a39d362ca87ad4023cc57e2282c713247db40f package.json
-          check_blob a85c26ba2d892211121f12db8993b05281e71655 public/index.html
-          check_blob d65fb3616e9ee8a51974cc3c3e5ea0420a59aad8 public/app.js
-          check_blob c9ffe9eee8cbb6fa6cc44e551a0eef9e44b2dcd1 public/styles.css
-          check_blob cc16020a2007a7622c1cf5b5f85e508862aca1dc public/i18n.js
-          check_blob 49b9b0ba2f71f52ae3033910e2dbb552f858f746 src/types.ts
-          check_blob 9d00adb5ed045c0467a231afda588b2092b0c21a src/room.ts
-          check_blob 34d6406812cd147ba7beef8ef861627b8f93f2b4 src/index.ts
-          check_blob 554d13f688dab3c8c17e4d7ad8e41afe031581df src/translate.ts
-          check_blob e8fbd8ce64302def4924d6666653e00d38940206 tsconfig.test.json
-          check_blob e1a785628a1a2b26bd0d3230f8130609397cdfe7 wrangler.jsonc
-          check_blob 8ecd055adc69884c6fc4c5bd6d855f050ff6ab7e test/translation.test.mjs
-          check_blob 5c1b4466d8bfdda32fe2e39dd3e405ba2bcb4816 test/i18n-static.test.mjs
+          done <<'EOF'
+          163aad80cc076f0c00fc1922b22daa519fd4c297 README.md
+          a84e320db05d44a92b71ededa6dd83c0b85b26e8 SECURITY.md
+          e8a39d362ca87ad4023cc57e2282c713247db40f package.json
+          a85c26ba2d892211121f12db8993b05281e71655 public/index.html
+          d65fb3616e9ee8a51974cc3c3e5ea0420a59aad8 public/app.js
+          c9ffe9eee8cbb6fa6cc44e551a0eef9e44b2dcd1 public/styles.css
+          cc16020a2007a7622c1cf5b5f85e508862aca1dc public/i18n.js
+          49b9b0ba2f71f52ae3033910e2dbb552f858f746 src/types.ts
+          9d00adb5ed045c0467a231afda588b2092b0c21a src/room.ts
+          34d6406812cd147ba7beef8ef861627b8f93f2b4 src/index.ts
+          554d13f688dab3c8c17e4d7ad8e41afe031581df src/translate.ts
+          e8fbd8ce64302def4924d6666653e00d38940206 tsconfig.test.json
+          e1a785628a1a2b26bd0d3230f8130609397cdfe7 wrangler.jsonc
+          8ecd055adc69884c6fc4c5bd6d855f050ff6ab7e test/translation.test.mjs
+          5c1b4466d8bfdda32fe2e39dd3e405ba2bcb4816 test/i18n-static.test.mjs
+          EOF
 
       - name: Install verified sources
         shell: bash
@@ -92,64 +84,50 @@ jobs:
       - name: Wrangler dry-run
         run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
 
-      - name: Re-verify exact source blobs
+      - name: Re-verify exact sources and create clean branch
         shell: bash
         run: |
           set -euo pipefail
-          check_blob() {
-            local expected="$1"
-            local path="$2"
-            local actual
+          while read -r expected path; do
             actual="$(git hash-object "$path")"
             test "$actual" = "$expected" || { echo "post-test hash mismatch: $path expected=$expected actual=$actual" >&2; exit 1; }
-          }
-          check_blob 163aad80cc076f0c00fc1922b22daa519fd4c297 README.md
-          check_blob a84e320db05d44a92b71ededa6dd83c0b85b26e8 SECURITY.md
-          check_blob e8a39d362ca87ad4023cc57e2282c713247db40f package.json
-          check_blob a85c26ba2d892211121f12db8993b05281e71655 public/index.html
-          check_blob d65fb3616e9ee8a51974cc3c3e5ea0420a59aad8 public/app.js
-          check_blob c9ffe9eee8cbb6fa6cc44e551a0eef9e44b2dcd1 public/styles.css
-          check_blob cc16020a2007a7622c1cf5b5f85e508862aca1dc public/i18n.js
-          check_blob 49b9b0ba2f71f52ae3033910e2dbb552f858f746 src/types.ts
-          check_blob 9d00adb5ed045c0467a231afda588b2092b0c21a src/room.ts
-          check_blob 34d6406812cd147ba7beef8ef861627b8f93f2b4 src/index.ts
-          check_blob 554d13f688dab3c8c17e4d7ad8e41afe031581df src/translate.ts
-          check_blob e8fbd8ce64302def4924d6666653e00d38940206 tsconfig.test.json
-          check_blob e1a785628a1a2b26bd0d3230f8130609397cdfe7 wrangler.jsonc
-          check_blob 8ecd055adc69884c6fc4c5bd6d855f050ff6ab7e test/translation.test.mjs
-          check_blob 5c1b4466d8bfdda32fe2e39dd3e405ba2bcb4816 test/i18n-static.test.mjs
-
-      - name: Create clean source-only staging commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf .chatgpt_i18n_payload .wrangler-dry-run
-          rm -f .github/workflows/chatgpt-i18n-staging.yml
-          if ! git ls-files --error-unmatch worker-configuration.d.ts >/dev/null 2>&1; then
-            rm -f worker-configuration.d.ts
-          fi
+          done <<'EOF'
+          163aad80cc076f0c00fc1922b22daa519fd4c297 README.md
+          a84e320db05d44a92b71ededa6dd83c0b85b26e8 SECURITY.md
+          e8a39d362ca87ad4023cc57e2282c713247db40f package.json
+          a85c26ba2d892211121f12db8993b05281e71655 public/index.html
+          d65fb3616e9ee8a51974cc3c3e5ea0420a59aad8 public/app.js
+          c9ffe9eee8cbb6fa6cc44e551a0eef9e44b2dcd1 public/styles.css
+          cc16020a2007a7622c1cf5b5f85e508862aca1dc public/i18n.js
+          49b9b0ba2f71f52ae3033910e2dbb552f858f746 src/types.ts
+          9d00adb5ed045c0467a231afda588b2092b0c21a src/room.ts
+          34d6406812cd147ba7beef8ef861627b8f93f2b4 src/index.ts
+          554d13f688dab3c8c17e4d7ad8e41afe031581df src/translate.ts
+          e8fbd8ce64302def4924d6666653e00d38940206 tsconfig.test.json
+          e1a785628a1a2b26bd0d3230f8130609397cdfe7 wrangler.jsonc
+          8ecd055adc69884c6fc4c5bd6d855f050ff6ab7e test/translation.test.mjs
+          5c1b4466d8bfdda32fe2e39dd3e405ba2bcb4816 test/i18n-static.test.mjs
+          EOF
+          paths=(README.md SECURITY.md package.json public/index.html public/app.js public/styles.css public/i18n.js src/types.ts src/room.ts src/index.ts src/translate.ts tsconfig.test.json wrangler.jsonc test/translation.test.mjs test/i18n-static.test.mjs)
+          for path in "${paths[@]}"; do
+            if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+              git restore --source=HEAD --staged --worktree -- "$path"
+            else
+              rm -f "$path"
+            fi
+          done
+          rm -rf .wrangler-dry-run .test-build
+          if ! git ls-files --error-unmatch worker-configuration.d.ts >/dev/null 2>&1; then rm -f worker-configuration.d.ts; fi
+          git switch -C chatgpt-i18n-clean-v1 a169cb8a2f57ed2a73df0cce60fe3b0e7d570e27
+          for path in "${paths[@]}"; do
+            mkdir -p "$(dirname "$path")"
+            cp "/tmp/payload/$path" "$path"
+          done
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add -- "${paths[@]}"
           git diff --cached --name-only | sort > /tmp/actual-files
-          cat > /tmp/expected-files <<'EOF'
-          README.md
-          SECURITY.md
-          package.json
-          public/app.js
-          public/i18n.js
-          public/index.html
-          public/styles.css
-          src/index.ts
-          src/room.ts
-          src/translate.ts
-          src/types.ts
-          test/i18n-static.test.mjs
-          test/translation.test.mjs
-          tsconfig.test.json
-          wrangler.jsonc
-          EOF
-          sort -o /tmp/expected-files /tmp/expected-files
+          printf '%s\n' "${paths[@]}" | sort > /tmp/expected-files
           diff -u /tmp/expected-files /tmp/actual-files
           git commit -m 'Add trilingual UI and live translation'
-          git push origin HEAD:chatgpt-i18n-live-translation-v1
+          git push origin HEAD:chatgpt-i18n-clean-v1
