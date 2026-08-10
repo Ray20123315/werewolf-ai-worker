@@ -56,13 +56,7 @@ jobs:
           for p in "${paths[@]}"; do
             mkdir -p "$(dirname "$p")" /tmp/merge-base/"$(dirname "$p")"
             if [[ "$p" == "public/styles.css" ]]; then
-              cat >> "$p" <<'CSS'
-
-.player-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.translation-status { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }
-.translation-status.is-error { color: #9a3412; }
-.admin-link { text-decoration: none; }
-CSS
+              printf '\n.player-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }\n.translation-status { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }\n.translation-status.is-error { color: #9a3412; }\n.admin-link { text-decoration: none; }\n' >> "$p"
             elif is_overlap "$p"; then
               git show "$OLD_BASE:$p" > "/tmp/merge-base/$p"
               cp "$p" "/tmp/theirs.$(basename "$p")"
