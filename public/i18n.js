@@ -55,6 +55,7 @@ const UI = {
   "平票無人出局": { "zh-TW": "平票無人出局", "zh-CN": "平票无人出局", en: "No elimination on tie" },
   "全場重投": { "zh-TW": "全場重投", "zh-CN": "全场重投", en: "Full revote" },
   "平票玩家 PK 後重投": { "zh-TW": "平票玩家 PK 後重投", "zh-CN": "平票玩家 PK 后重投", en: "Tied players debate, then revote" },
+  "平票隨機淘汰 1 人": { "zh-TW": "平票隨機淘汰 1 人", "zh-CN": "平票随机淘汰 1 人", en: "Randomly eliminate 1 tied player" },
   "套用房規": { "zh-TW": "套用房規", "zh-CN": "应用房规", en: "Apply rules" },
   "角色配置": { "zh-TW": "角色配置", "zh-CN": "角色配置", en: "Role setup" },
   "自動配置角色（依正式玩家數）": { "zh-TW": "自動配置角色（依正式玩家數）", "zh-CN": "自动配置角色（按正式玩家数）", en: "Auto-configure roles (by active players)" },

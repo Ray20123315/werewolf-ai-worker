@@ -290,6 +290,13 @@ export function topWeightedVoteTargets(state: GameState): string[] {
   return entries.filter(([, count]) => count === top).map(([id]) => id);
 }
 
+export function randomTopVoteTarget(state: GameState): string | undefined {
+  const topTargets = topWeightedVoteTargets(state);
+  if (topTargets.length === 0) return undefined;
+  if (topTargets.length === 1) return topTargets[0];
+  return secureShuffle(topTargets)[0];
+}
+
 export function weightedPluralityTarget(state: GameState): string | undefined {
   const top = topWeightedVoteTargets(state);
   return top.length === 1 ? top[0] : undefined;

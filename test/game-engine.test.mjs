@@ -18,6 +18,7 @@ import {
   isAIVotingUnlocked,
   isDebateComplete,
   pluralityTarget,
+  randomTopVoteTarget,
   resolveNight,
   roleDeckFromSetup,
   topWeightedVoteTargets,
@@ -110,6 +111,14 @@ test("a sole neutral last survivor wins", () => {
 test("plurality returns unique top target and no target on tie", () => {
   assert.equal(pluralityTarget({ a: "x", b: "x", c: "y" }), "x");
   assert.equal(pluralityTarget({ a: "x", b: "y" }), undefined);
+});
+
+test("random tie elimination can only select a highest-vote tied candidate", () => {
+  const state = baseState([p("a", "villager"), p("b", "villager"), p("c", "werewolf"), p("d", "villager")], {
+    a: "b", b: "c", c: "b", d: "c"
+  });
+  assert.deepEqual(new Set(topWeightedVoteTargets(state)), new Set(["b", "c"]));
+  for (let i = 0; i < 64; i += 1) assert.ok(["b", "c"].includes(randomTopVoteTarget(state)));
 });
 
 test("weighted voting supports zero-weight and PK top target detection", () => {

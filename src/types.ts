@@ -273,7 +273,7 @@ export type WitchAction =
   | { type: "poison"; targetId: string };
 
 export type DeathInfoMode = "hidden" | "names" | "full";
-export type TieRule = "no_elimination" | "revote" | "pk_revote";
+export type TieRule = "no_elimination" | "revote" | "pk_revote" | "random_elimination";
 
 export interface GameSettings {
   sheriffEnabled: boolean;

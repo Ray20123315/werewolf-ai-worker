@@ -21,6 +21,7 @@ import {
   playerFaction,
   roleActionPrompt,
   roleSetupTotal,
+  randomTopVoteTarget,
   secureShuffle,
   teamForRole,
   topWeightedVoteTargets,
@@ -373,7 +374,7 @@ export class GameRoom extends DurableObject<Env> {
     this.assertLobby(state);
     if (typeof raw.sheriffEnabled === "boolean") state.settings.sheriffEnabled = raw.sheriffEnabled;
     if (raw.deathInfo && ["hidden", "names", "full"].includes(raw.deathInfo)) state.settings.deathInfo = raw.deathInfo;
-    if (raw.tieRule && ["no_elimination", "revote", "pk_revote"].includes(raw.tieRule)) state.settings.tieRule = raw.tieRule;
+    if (raw.tieRule && ["no_elimination", "revote", "pk_revote", "random_elimination"].includes(raw.tieRule)) state.settings.tieRule = raw.tieRule;
     if (typeof raw.autoRoleSetup === "boolean") {
       state.settings.autoRoleSetup = raw.autoRoleSetup;
       if (raw.autoRoleSetup) state.roleSetup = defaultRoleSetup(activePlayers(state.players).filter((p) => !p.kickedAt).length);
@@ -887,7 +888,11 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     const topTargets = topWeightedVoteTargets(state);
-    const eliminatedId = topTargets.length === 1 ? topTargets[0] : undefined;
+    const randomTieElimination = topTargets.length > 1 && state.settings.tieRule === "random_elimination";
+    const eliminatedId = topTargets.length === 1 ? topTargets[0] : randomTieElimination ? randomTopVoteTarget(state) : undefined;
+    if (randomTieElimination && eliminatedId) {
+      this.addSystemMessage(state, `最高票平手：${topTargets.map((id) => this.nameOf(state, id)).join("、")}。依房規隨機抽中 ${this.nameOf(state, eliminatedId)} 出局。`);
+    }
     if (!eliminatedId && topTargets.length > 1) {
       const system = this.systemMem(state);
       const revoteCount = Number(system.voteRevoteCount ?? 0);
@@ -921,7 +926,7 @@ export class GameRoom extends DurableObject<Env> {
 
     if (eliminatedId) {
       const target = state.players.find((p) => p.id === eliminatedId);
-      if (target?.role === "masochist_cultist") {
+      if (topTargets.length === 1 && target?.role === "masochist_cultist") {
         state.winner = "neutral";
         state.winnerPlayerIds = [target.id];
         state.winnerLabel = `${target.name}（抖M教徒）成為唯一最高票者，達成特殊勝利`;

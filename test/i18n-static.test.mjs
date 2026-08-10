@@ -15,6 +15,8 @@ test("UI dictionary has distinct Traditional Simplified and English product labe
   assert.equal(knownText("自動配置角色（依正式玩家數）", "zh-CN"), "自动配置角色（按正式玩家数）");
   assert.equal(knownText("自動配置角色（依正式玩家數）", "en"), "Auto-configure roles (by active players)");
   assert.equal(knownText("最多 8 組，只存此瀏覽器 session", "en"), "Up to 8; stored only in this browser session");
+  assert.equal(knownText("平票隨機淘汰 1 人", "zh-CN"), "平票随机淘汰 1 人");
+  assert.equal(knownText("平票隨機淘汰 1 人", "en"), "Randomly eliminate 1 tied player");
 });
 
 test("browser locale normalization keeps zh-TW zh-CN and en separate", () => {
@@ -33,12 +35,22 @@ test("page exposes three-language UI, automatic role setup, and multi-key AI BYO
   assert.match(html, /value="en"/);
   assert.match(html, /id="autoRoleSetup"/);
   assert.match(html, /textarea name="apiKeys"/);
+  assert.match(html, /value="random_elimination"/);
   assert.match(app, /type: "configure_settings", settings: \{ autoRoleSetup:/);
   assert.match(app, /parseApiKeyPool/);
   assert.match(app, /apiKeys: keys/);
   assert.match(app, /type: "chat", content, locale: getLocale\(\)/);
   assert.match(app, /type: "debate_speech", content, locale: getLocale\(\)/);
   assert.match(app, /\/translate`/);
+});
+
+test("random tie rule is server-authoritative and reuses the normal exile pipeline", () => {
+  const types = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");
+  const room = readFileSync(new URL("../src/room.ts", import.meta.url), "utf8");
+  assert.match(types, /random_elimination/);
+  assert.match(room, /state\.settings\.tieRule === "random_elimination"/);
+  assert.match(room, /randomTopVoteTarget\(state\)/);
+  assert.match(room, /topTargets\.length === 1 && target\?\.role === "masochist_cultist"/);
 });
 
 test("server translation endpoint uses authenticated Google Cloud Translation v2 without Workers AI binding", () => {
