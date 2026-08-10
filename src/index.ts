@@ -1,7 +1,11 @@
-export { GameRoom } from "./room";
+import { GameRoom } from "./room";
+import { installChatChannels } from "./chat-channels";
 import { ROLE_LIST } from "./roles";
 import type { AIConfig } from "./types";
 import { normalizeTranslationLocale, parseGoogleTranslateApiKeys, translateTexts, validateTranslationTexts } from "./translate";
+
+installChatChannels(GameRoom);
+export { GameRoom };
 
 type JsonObject = Record<string, unknown>;
 type WorkerEnv = Env & { GOOGLE_TRANSLATE_API_KEYS?: string };
@@ -39,7 +43,6 @@ export default {
         }
         throw new Error("建立房間失敗，請重試");
       }
-
 
       const translate = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/translate$/);
       if (translate && request.method === "POST") {
