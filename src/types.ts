@@ -2,10 +2,20 @@ export type Phase = "lobby" | "night" | "debate" | "vote" | "ended";
 export type Role = "werewolf" | "villager" | "seer" | "witch" | "guard";
 export type Team = "werewolf" | "village";
 export type AIProvider = "openai" | "gemini" | "deepseek" | "openai-compatible";
+export type AIOperation = "night_action" | "debate_speech" | "vote";
+
+export interface RoleSetup {
+  werewolf: number;
+  villager: number;
+  seer: number;
+  witch: number;
+  guard: number;
+}
 
 export interface AIConfig {
   provider: AIProvider;
   model: string;
+  baseUrl?: string;
 }
 
 export interface Player {
@@ -24,7 +34,7 @@ export interface ChatMessage {
   playerId?: string;
   playerName: string;
   content: string;
-  kind: "speech" | "system";
+  kind: "chat" | "speech" | "system";
   createdAt: number;
   round: number;
   phase: Phase;
@@ -45,10 +55,10 @@ export type WitchAction =
 export interface GameState {
   roomId: string;
   hostPlayerId: string;
-  maxPlayers: number;
   phase: Phase;
   round: number;
   players: Player[];
+  roleSetup: RoleSetup;
   messages: ChatMessage[];
   votes: Record<string, string>;
   nightActions: NightActions;
@@ -76,12 +86,19 @@ export interface PublicPlayer {
   role?: Role;
 }
 
+export interface PendingAITask {
+  playerId: string;
+  operation: AIOperation;
+}
+
 export interface PrivateView {
   roomId: string;
   phase: Phase;
   round: number;
-  maxPlayers: number;
   players: PublicPlayer[];
+  roleSetup: RoleSetup;
+  roleSetupError?: string;
+  canStart: boolean;
   messages: ChatMessage[];
   me: {
     id: string;
@@ -104,6 +121,7 @@ export interface PrivateView {
   debateCompleted: string[];
   currentSpeakerId?: string;
   aiVotingUnlocked: boolean;
+  pendingAI?: PendingAITask;
   lastNightDeaths: string[];
   lastVoteEliminated?: string;
   winner?: Team;
@@ -111,6 +129,8 @@ export interface PrivateView {
 
 export type ClientMessage =
   | { type: "start" }
+  | { type: "chat"; content: string }
+  | { type: "configure_roles"; roles: RoleSetup }
   | { type: "debate_speech"; content: string }
   | { type: "vote"; targetId: string }
   | { type: "night_action"; action: NightClientAction };
