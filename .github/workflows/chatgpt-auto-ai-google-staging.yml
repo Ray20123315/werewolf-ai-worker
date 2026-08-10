@@ -1,0 +1,170 @@
+name: chatgpt-auto-ai-google-staging
+
+on:
+  push:
+    branches:
+      - chatgpt-auto-ai-google-translate-v1
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-promote:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Reconstruct and verify exact payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .chatgpt_auto_google_payload/chunk-* > /tmp/payload.b64
+          base64 -d /tmp/payload.b64 > /tmp/payload.tar.xz
+          echo 'bc6521af9c94c87dd4c18f0c1e2e1ea2c586a45b789ddf3983619cc7a8bbb7ec  /tmp/payload.tar.xz' | sha256sum -c -
+          mkdir /tmp/payload
+          tar -xJf /tmp/payload.tar.xz -C /tmp/payload
+          check_blob() {
+            local expected="$1"
+            local path="$2"
+            local actual
+            actual="$(git hash-object "/tmp/payload/$path")"
+            test "$actual" = "$expected" || { echo "hash mismatch: $path expected=$expected actual=$actual" >&2; exit 1; }
+          }
+          check_blob ad09be0a1caeebcd4d4acc180fadfd1a1bf6eaa3 .dev.vars.example
+          check_blob 89cebd640e7c49c8704b3c932cded9632ffc94d3 README.md
+          check_blob 93c31d04331efeb83bdbf37e0e66a255450a571d SECURITY.md
+          check_blob e57f96d5046d7dbfe65231aa14b9eea21db4abc1 public/app.js
+          check_blob 267594966bb91fd1065367925a4c3821e51a4e45 public/i18n.js
+          check_blob 6b888d172e90e7bad8228e0b6e15d2d35aa6cd0e public/index.html
+          check_blob f784571afb3140313fd573dba1d7fc461016a1fa public/styles.css
+          check_blob e57fc667987a7b1b4255fb02181bd90baf17e0b5 src/ai.ts
+          check_blob a27d75757c231abf8bc30feedf1ac57c7dc412f8 src/index.ts
+          check_blob f418f70c13336b64fe44b3d8174563982af66409 src/room.ts
+          check_blob 0a324545cd7a2fb24b004f0cbb17ae97691ca4a6 src/translate.ts
+          check_blob 4666551641c1441068d5db81b1c52fbb63cad2b2 src/types.ts
+          check_blob 707bb6e6bb670ea0fd661098bcbd5f0f61a37509 test/i18n-static.test.mjs
+          check_blob 41515dcf200acb2178062ff501e25ab63b2367bf test/translation.test.mjs
+          check_blob 2f6b5e466e2d9f217c8a68ae269ef310f2f5e18c tsconfig.test.json
+          check_blob 8a6f68ec453632da010a3b467ff6022d8bb1bd31 wrangler.jsonc
+
+      - name: Install verified sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r path; do
+            mkdir -p "$(dirname "$path")"
+            cp "/tmp/payload/$path" "$path"
+          done <<'EOF'
+          .dev.vars.example
+          README.md
+          SECURITY.md
+          public/app.js
+          public/i18n.js
+          public/index.html
+          public/styles.css
+          src/ai.ts
+          src/index.ts
+          src/room.ts
+          src/translate.ts
+          src/types.ts
+          test/i18n-static.test.mjs
+          test/translation.test.mjs
+          tsconfig.test.json
+          wrangler.jsonc
+          EOF
+
+      - name: npm ci
+        run: npm ci
+      - name: npm test
+        run: npm test
+      - name: npm run typecheck
+        run: npm run typecheck
+      - name: Wrangler dry-run
+        run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+
+      - name: Re-verify exact sources and create clean branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_blob() {
+            local expected="$1"
+            local path="$2"
+            local actual
+            actual="$(git hash-object "$path")"
+            test "$actual" = "$expected" || { echo "post-test hash mismatch: $path expected=$expected actual=$actual" >&2; exit 1; }
+          }
+          check_blob ad09be0a1caeebcd4d4acc180fadfd1a1bf6eaa3 .dev.vars.example
+          check_blob 89cebd640e7c49c8704b3c932cded9632ffc94d3 README.md
+          check_blob 93c31d04331efeb83bdbf37e0e66a255450a571d SECURITY.md
+          check_blob e57f96d5046d7dbfe65231aa14b9eea21db4abc1 public/app.js
+          check_blob 267594966bb91fd1065367925a4c3821e51a4e45 public/i18n.js
+          check_blob 6b888d172e90e7bad8228e0b6e15d2d35aa6cd0e public/index.html
+          check_blob f784571afb3140313fd573dba1d7fc461016a1fa public/styles.css
+          check_blob e57fc667987a7b1b4255fb02181bd90baf17e0b5 src/ai.ts
+          check_blob a27d75757c231abf8bc30feedf1ac57c7dc412f8 src/index.ts
+          check_blob f418f70c13336b64fe44b3d8174563982af66409 src/room.ts
+          check_blob 0a324545cd7a2fb24b004f0cbb17ae97691ca4a6 src/translate.ts
+          check_blob 4666551641c1441068d5db81b1c52fbb63cad2b2 src/types.ts
+          check_blob 707bb6e6bb670ea0fd661098bcbd5f0f61a37509 test/i18n-static.test.mjs
+          check_blob 41515dcf200acb2178062ff501e25ab63b2367bf test/translation.test.mjs
+          check_blob 2f6b5e466e2d9f217c8a68ae269ef310f2f5e18c tsconfig.test.json
+          check_blob 8a6f68ec453632da010a3b467ff6022d8bb1bd31 wrangler.jsonc
+          rm -rf .wrangler-dry-run
+          if ! git ls-files --error-unmatch worker-configuration.d.ts >/dev/null 2>&1; then
+            rm -f worker-configuration.d.ts
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C chatgpt-auto-ai-google-clean-v1 cb66f93b363c43b9f5546db0b3e129a748968f81
+          while read -r path; do
+            mkdir -p "$(dirname "$path")"
+            cp "/tmp/payload/$path" "$path"
+          done <<'EOF'
+          .dev.vars.example
+          README.md
+          SECURITY.md
+          public/app.js
+          public/i18n.js
+          public/index.html
+          public/styles.css
+          src/ai.ts
+          src/index.ts
+          src/room.ts
+          src/translate.ts
+          src/types.ts
+          test/i18n-static.test.mjs
+          test/translation.test.mjs
+          tsconfig.test.json
+          wrangler.jsonc
+          EOF
+          git add -- .dev.vars.example README.md SECURITY.md public/app.js public/i18n.js public/index.html public/styles.css src/ai.ts src/index.ts src/room.ts src/translate.ts src/types.ts test/i18n-static.test.mjs test/translation.test.mjs tsconfig.test.json wrangler.jsonc
+          git diff --cached --name-only | sort > /tmp/actual-files
+          cat > /tmp/expected-files <<'EOF'
+          .dev.vars.example
+          README.md
+          SECURITY.md
+          public/app.js
+          public/i18n.js
+          public/index.html
+          public/styles.css
+          src/ai.ts
+          src/index.ts
+          src/room.ts
+          src/translate.ts
+          src/types.ts
+          test/i18n-static.test.mjs
+          test/translation.test.mjs
+          tsconfig.test.json
+          wrangler.jsonc
+          EOF
+          sort -o /tmp/expected-files /tmp/expected-files
+          diff -u /tmp/expected-files /tmp/actual-files
+          git commit -m 'Add auto roles multi-key AI and Google translation'
+          git push origin HEAD:chatgpt-auto-ai-google-clean-v1
