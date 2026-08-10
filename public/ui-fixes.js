@@ -2,21 +2,25 @@
   const COLLAPSE_PREFIX = "werewolf-panel-collapsed:";
   const ROLE_GROUP_PREFIX = "werewolf-role-group-collapsed:";
   const STATUS_ID = "translationServiceStatus";
+  const nativeFetch = window.fetch.bind(window);
+  const staticI18n = () => window.WerewolfGameI18n;
+  const staticSources = new WeakMap();
+
   const LABELS = {
     "zh-TW": {
       collapse: "縮起",
       expand: "展開",
-      translationError: "翻譯服務目前無法使用；請確認 Worker Secret GOOGLE_TRANSLATE_API_KEYS。"
+      translationError: "玩家聊天 Google 翻譯目前無法使用；請確認 Worker Secret GOOGLE_TRANSLATE_API_KEYS。"
     },
     "zh-CN": {
       collapse: "收起",
       expand: "展开",
-      translationError: "翻译服务目前不可用；请确认 Worker Secret GOOGLE_TRANSLATE_API_KEYS。"
+      translationError: "玩家聊天 Google 翻译目前不可用；请确认 Worker Secret GOOGLE_TRANSLATE_API_KEYS。"
     },
     en: {
       collapse: "Collapse",
       expand: "Expand",
-      translationError: "Translation is unavailable. Check the GOOGLE_TRANSLATE_API_KEYS Worker Secret."
+      translationError: "Google translation for player chat is unavailable. Check the GOOGLE_TRANSLATE_API_KEYS Worker Secret."
     }
   };
 
@@ -24,7 +28,7 @@
   let websocketToken = "";
   let timer = 0;
   let generation = 0;
-  const cache = new Map();
+  const chatCache = new Map();
 
   function locale() {
     const value = localStorage.getItem("werewolf-locale");
@@ -49,6 +53,19 @@
       return "";
     }
   }
+
+  // The app's generic i18n fallback previously sent arbitrary game UI/system text to
+  // Google Translation. Block that path. This file uses nativeFetch directly only
+  // for human-authored chat/formal speeches.
+  window.fetch = function guardedFetch(input, init) {
+    try {
+      const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url, location.href);
+      if (/^\/api\/rooms\/[A-Z2-9]{6}\/translate$/.test(url.pathname)) {
+        return Promise.reject(new Error("Remote translation is reserved for player chat"));
+      }
+    } catch {}
+    return nativeFetch(input, init);
+  };
 
   function installWebSocketObserver() {
     const NativeWebSocket = window.WebSocket;
@@ -79,7 +96,7 @@
     window.WebSocket = UiFixWebSocket;
   }
 
-  async function requestTranslations(texts, sourceLocale, targetLocale) {
+  async function requestChatTranslations(texts, sourceLocale, targetLocale) {
     if (!texts.length || sourceLocale === targetLocale) return [...texts];
     const id = roomId();
     const token = roomToken();
@@ -88,7 +105,7 @@
     const output = [];
     for (let index = 0; index < texts.length; index += 40) {
       const chunk = texts.slice(index, index + 40);
-      const response = await fetch(`/api/rooms/${id}/translate`, {
+      const response = await nativeFetch(`/api/rooms/${id}/translate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token, sourceLocale, targetLocale, texts: chunk })
@@ -103,14 +120,14 @@
     return output;
   }
 
-  async function translatedMap(texts, sourceLocale, targetLocale) {
+  async function translatedChatMap(texts, sourceLocale, targetLocale) {
     const unique = [...new Set(texts.map((value) => String(value ?? "").trim()).filter(Boolean))];
-    const missing = unique.filter((source) => !cache.has(`${sourceLocale}\u0000${targetLocale}\u0000${source}`));
+    const missing = unique.filter((source) => !chatCache.has(`${sourceLocale}\u0000${targetLocale}\u0000${source}`));
     if (missing.length) {
-      const translated = await requestTranslations(missing, sourceLocale, targetLocale);
-      missing.forEach((source, index) => cache.set(`${sourceLocale}\u0000${targetLocale}\u0000${source}`, translated[index] || source));
+      const translated = await requestChatTranslations(missing, sourceLocale, targetLocale);
+      missing.forEach((source, index) => chatCache.set(`${sourceLocale}\u0000${targetLocale}\u0000${source}`, translated[index] || source));
     }
-    return new Map(unique.map((source) => [source, sourceLocale === targetLocale ? source : cache.get(`${sourceLocale}\u0000${targetLocale}\u0000${source}`) || source]));
+    return new Map(unique.map((source) => [source, sourceLocale === targetLocale ? source : chatCache.get(`${sourceLocale}\u0000${targetLocale}\u0000${source}`) || source]));
   }
 
   function statusNode() {
@@ -142,71 +159,115 @@
     const rows = [...document.querySelectorAll("#messages .message")];
     if (!rows.length) return;
     const targetLocale = locale();
-    const groups = new Map();
+    const playerGroups = new Map();
+    const fixed = staticI18n();
 
     latestState.messages.forEach((message, index) => {
       const row = rows[index];
       if (!row) return;
       const sourceLocale = message.sourceLocale || "zh-TW";
       const source = String(message.content ?? "");
-      if (sourceLocale === targetLocale) {
-        const body = row.querySelector(".message-content");
-        if (body) {
-          body.textContent = source;
-          body.title = source;
+      const body = row.querySelector(".message-content");
+      const name = row.querySelector(".message-head strong");
+
+      if (message.kind === "system" || message.kind === "role") {
+        const translated = targetLocale === "zh-TW" ? source : fixed?.text(source, targetLocale) || source;
+        if (body && body.textContent !== translated) body.textContent = translated;
+        if (body && body.title !== translated) body.title = translated;
+        if (message.kind === "system" && name) {
+          const systemName = targetLocale === "zh-TW" ? "系統" : fixed?.text("系統", targetLocale) || "系統";
+          if (name.textContent !== systemName) name.textContent = systemName;
         }
         return;
       }
-      const items = groups.get(sourceLocale) || [];
+
+      // Only human/AI player-authored free chat and formal speeches use Google Translation.
+      if (sourceLocale === targetLocale) {
+        if (body && body.textContent !== source) body.textContent = source;
+        if (body && body.title !== source) body.title = source;
+        return;
+      }
+      const items = playerGroups.get(sourceLocale) || [];
       items.push({ row, source });
-      groups.set(sourceLocale, items);
+      playerGroups.set(sourceLocale, items);
     });
 
-    for (const [sourceLocale, items] of groups) {
-      const map = await translatedMap(items.map((item) => item.source), sourceLocale, targetLocale);
+    for (const [sourceLocale, items] of playerGroups) {
+      const map = await translatedChatMap(items.map((item) => item.source), sourceLocale, targetLocale);
       if (runGeneration !== generation) return;
       for (const item of items) {
         const body = item.row.querySelector(".message-content");
         const translated = map.get(item.source) || item.source;
-        if (body) {
-          body.textContent = translated;
-          body.title = translated;
-        }
+        if (body && body.textContent !== translated) body.textContent = translated;
+        if (body && body.title !== translated) body.title = translated;
       }
     }
   }
 
-  async function translateRoleCatalog(runGeneration) {
+  function translateRoleCatalog() {
     const targetLocale = locale();
-    const nodes = [...document.querySelectorAll("#roleCatalog .role-title strong, #roleCatalog .role-copy p, #roleCatalog .adaptation")];
-    if (!nodes.length || targetLocale === "zh-TW" || runGeneration !== generation) return;
-
-    const sources = [];
-    for (const node of nodes) {
-      const current = node.textContent?.trim() || "";
-      if (!current) continue;
-      if (!node.dataset.uiFixSource) node.dataset.uiFixSource = current;
-      const source = node.dataset.uiFixSource;
-      if (source) sources.push(source);
+    const fixed = staticI18n();
+    if (!fixed) return;
+    for (const card of document.querySelectorAll("#roleCatalog [data-role-card]")) {
+      const roleId = card.dataset.roleCard;
+      const name = card.querySelector(".role-title strong");
+      const summary = card.querySelector(".role-copy p");
+      const adaptation = card.querySelector(".adaptation");
+      if (name) {
+        if (!name.dataset.fixedZhTw) name.dataset.fixedZhTw = name.textContent?.trim() || "";
+        const translated = fixed.role(roleId, "name", targetLocale, name.dataset.fixedZhTw);
+        if (name.textContent !== translated) name.textContent = translated;
+      }
+      if (summary) {
+        if (!summary.dataset.fixedZhTw) summary.dataset.fixedZhTw = summary.textContent?.trim() || "";
+        const translated = fixed.role(roleId, "summary", targetLocale, summary.dataset.fixedZhTw);
+        if (summary.textContent !== translated) summary.textContent = translated;
+      }
+      if (adaptation) {
+        if (!adaptation.dataset.fixedZhTw) adaptation.dataset.fixedZhTw = adaptation.textContent?.trim() || "";
+        const translated = fixed.text(adaptation.dataset.fixedZhTw, targetLocale);
+        if (adaptation.textContent !== translated) adaptation.textContent = translated;
+      }
     }
-    if (!sources.length) return;
+  }
 
-    const map = await translatedMap(sources, "zh-TW", targetLocale);
-    if (runGeneration !== generation) return;
-    for (const node of nodes) {
-      const source = node.dataset.uiFixSource || "";
-      if (source) node.textContent = map.get(source) || source;
+  function translateFixedGameDom() {
+    const targetLocale = locale();
+    const fixed = staticI18n();
+    if (!fixed) return;
+    const root = document.body;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest("script, style, #messages, [data-no-translate], #roleCatalog")) continue;
+      const current = (node.nodeValue || "").trim();
+      if (!current) continue;
+      let source = staticSources.get(node);
+      if (!source) {
+        if (!fixed.canTranslate(current)) continue;
+        source = current;
+        staticSources.set(node, source);
+      }
+      const translated = fixed.text(source, targetLocale);
+      if (translated === source && targetLocale !== "zh-TW") continue;
+      const original = node.nodeValue || "";
+      const start = original.indexOf(current);
+      const next = `${original.slice(0, start)}${translated}${original.slice(start + current.length)}`;
+      if (next !== original) node.nodeValue = next;
     }
   }
 
   async function translateDynamicContent() {
+    const runGeneration = generation;
+    translateRoleCatalog();
+    translateFixedGameDom();
     if (!roomId() || locale() === "zh-TW") {
       clearTranslationError();
       return;
     }
-    const runGeneration = generation;
     try {
-      await Promise.all([translateMessages(runGeneration), translateRoleCatalog(runGeneration)]);
+      await translateMessages(runGeneration);
       if (runGeneration === generation) clearTranslationError();
     } catch {
       if (runGeneration === generation) showTranslationError();
@@ -294,7 +355,7 @@
 
     document.querySelector("#languageSelect")?.addEventListener("change", () => {
       generation += 1;
-      cache.clear();
+      chatCache.clear();
       setTimeout(() => {
         installPanelCollapse();
         installRoleGroupCollapse();
@@ -307,6 +368,8 @@
 
     const game = document.querySelector("#game");
     if (game) new MutationObserver(schedule).observe(game, { childList: true, subtree: true });
+    const dialog = document.querySelector("#confirmDialog");
+    if (dialog) new MutationObserver(schedule).observe(dialog, { childList: true, subtree: true });
     schedule();
   }
 
