@@ -1,0 +1,60 @@
+name: private-chat-patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/private-chat-patch.yml
+      - scripts/private_chat_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Normalize patcher public-log replacement
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          p = Path("scripts/private_chat_patch.py")
+          s = p.read_text()
+          start_marker = 'replace_once(\n    "src/room.ts",\n    \'    const logs = state.messages.slice(-40)'
+          end_marker = 'replace_once(\n    "src/room.ts",\n    \'      messages: state.messages'
+          start = s.index(start_marker)
+          end = s.index(end_marker, start)
+          replacement = '''p_room = Path("src/room.ts")
+          room_text = p_room.read_text()
+          log_prefix = '    const logs = state.messages.slice(-40).map((m) =>'
+          if room_text.count(log_prefix) != 1:
+              raise SystemExit(f"src/room.ts: expected one public log prefix, got {room_text.count(log_prefix)}")
+          p_room.write_text(room_text.replace(log_prefix, '    const logs = state.messages.filter((m) => (m.channel ?? "public") === "public").slice(-40).map((m) =>', 1))
+
+          '''
+          p.write_text(s[:start] + replacement + s[end:])
+          PY
+      - run: python scripts/private_chat_patch.py
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+      - name: Commit verified patch
+        shell: bash
+        run: |
+          git config user.name "raychen"
+          git config user.email "150588882+Ray20123315@users.noreply.github.com"
+          git add src/chat.ts src/types.ts src/room.ts public/index.html public/app.js public/i18n.js public/styles.css test/game-engine.test.mjs test/i18n-static.test.mjs
+          git diff --cached --check
+          git diff --cached --quiet && { echo "No changes to commit"; exit 1; }
+          git commit -m "Add private wolf and lovers chat"
+          git push origin HEAD:main
