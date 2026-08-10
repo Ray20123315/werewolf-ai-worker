@@ -24,16 +24,19 @@ This project uses BYOK (bring your own key) for optional AI players.
 
 ## 3. Translation data path
 
-The trilingual UI supports Traditional Chinese (`zh-TW`), Simplified Chinese (`zh-CN`), and English (`en`). Dynamic cross-language text is translated with Google Cloud Translation Basic v2.
+The trilingual UI supports Traditional Chinese (`zh-TW`), Simplified Chinese (`zh-CN`), and English (`en`). UI, role data, system messages, rules, and skill text use fixed repository translations and are not sent to remote translation providers.
+
+Only player-authored `chat` and `speech` text may be remotely translated when the viewer uses another language.
 
 - Translation does **not** use or expose the host's BYOK game-AI credentials.
-- The deployment supplies Google Translation credentials through the Worker Secret `GOOGLE_TRANSLATE_API_KEYS`. It accepts 1–8 API keys separated by newline, comma, or semicolon; real keys must never be committed to the repository.
-- `/api/rooms/:roomId/translate` requires a valid room/player session before translation is allowed.
+- Translation does **not** require a Google Cloud Translation API key, Google Cloud Project, billing account, or Worker Secret.
+- `/api/rooms/:roomId/translate` requires a valid room/player session before translation is allowed, so the upstream translation path is not exposed as a public anonymous proxy.
 - Translation requests are bounded by item count, per-item length, and total request length.
 - Player chat and formal speeches remain canonical in their original text in room state, with source-locale metadata. Translation changes presentation only.
 - Translated variants are cached only in the viewer's current page memory by the client implementation; they are not written back into the canonical room state.
-- When a viewer requests another language, the relevant text is sent to Google Cloud Translation. Deployers should account for Google Cloud privacy, quota, billing, API-key restrictions, and credential rotation.
-- On invalid credentials, quota/rate limiting, or transient service errors, the translation layer may try the next configured Google API key. Other deterministic request errors fail immediately.
+- The primary upstream path follows the user-provided Userscript: `https://translate.googleapis.com/translate_a/single` with `client=gtx`, `sl=auto`, `tl`, `dt=t`, and `q` query parameters.
+- If Google has not produced a useful result quickly, the Worker may start a short-text MyMemory request after 180ms. MyMemory is limited to source text of at most 500 UTF-8 bytes. If MyMemory wins first, Google still gets a 140ms preference window.
+- The `translate.googleapis.com` `client=gtx` route is not the documented Google Cloud Translation API. Deployers should treat it as an external, changeable dependency that may be rate-limited, changed, or unavailable without notice.
 - Translation failure falls back to the original text and never blocks chat, debate progression, or voting.
 
 ## 4. Private game information
