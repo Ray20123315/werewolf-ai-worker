@@ -10,25 +10,34 @@ export default {
 
     try {
       if (request.method === "GET" && url.pathname === "/api/health") {
-        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers" });
+        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers", aiMode: "byok" });
       }
 
       if (request.method === "POST" && url.pathname === "/api/rooms") {
         const body = await readJson(request);
         const name = stringField(body, "name");
-        const maxPlayers = clampInt(numberField(body, "maxPlayers", 8), 5, 12);
         for (let attempt = 0; attempt < 5; attempt += 1) {
           const roomId = randomRoomCode();
           const room = env.GAME_ROOM.getByName(roomId);
           try {
-            const result = await room.initialize(roomId, name, maxPlayers);
-            return json(result, 201);
+            return json(await room.initialize(roomId, name), 201);
           } catch (error) {
             if (error instanceof Error && error.message.includes("ROOM_ALREADY_EXISTS")) continue;
             throw error;
           }
         }
         throw new Error("建立房間失敗，請重試");
+      }
+
+      const aiRun = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/ai\/run$/);
+      if (aiRun && request.method === "POST") {
+        const body = await readJson(request);
+        const room = env.GAME_ROOM.getByName(aiRun[1]!);
+        return json(await room.runAI(
+          stringField(body, "token"),
+          stringField(body, "playerId"),
+          stringField(body, "apiKey", 1024)
+        ));
       }
 
       const match = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})(?:\/(join|ai|state|ws))?$/);
@@ -44,42 +53,39 @@ export default {
 
       if (action === "ai" && request.method === "POST") {
         const body = await readJson(request);
-        const ai = parseAIConfig(body, env);
-        return json(await room.addAI(stringField(body, "token"), stringField(body, "name"), ai), 201);
+        return json(await room.addAI(
+          stringField(body, "token"),
+          stringField(body, "name"),
+          parseAIConfig(body)
+        ), 201);
       }
 
       if (action === "state" && request.method === "GET") {
-        const token = url.searchParams.get("token") ?? "";
-        return json(await room.getStateByToken(token));
+        return json(await room.getStateByToken(url.searchParams.get("token") ?? ""));
       }
 
-      if (action === "ws" && request.method === "GET") {
-        return room.fetch(request);
-      }
-
+      if (action === "ws" && request.method === "GET") return room.fetch(request);
       return json({ error: "Method not allowed" }, 405);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Internal error";
-      const status = message.includes("不存在") ? 404 : message.includes("憑證") || message.includes("只有房主") ? 403 : 400;
+      const status = message.includes("不存在") ? 404
+        : message.includes("憑證") || message.includes("只有房主") ? 403
+          : message.startsWith("AI provider HTTP") ? 502
+            : 400;
       return json({ error: message }, status);
     }
   }
 };
 
-function parseAIConfig(body: JsonObject, env: Env): AIConfig {
+function parseAIConfig(body: JsonObject): AIConfig {
   const rawProvider = stringField(body, "provider");
   if (!isAIProvider(rawProvider)) throw new Error("AI provider 無效");
-  const provider = rawProvider;
-  const explicitModel = optionalStringField(body, "model");
-  const defaults: Record<AIConfig["provider"], string> = {
-    openai: env.OPENAI_MODEL_DEFAULT,
-    gemini: env.GEMINI_MODEL_DEFAULT,
-    deepseek: env.DEEPSEEK_MODEL_DEFAULT,
-    "openai-compatible": env.CUSTOM_OPENAI_MODEL_DEFAULT
+  const config: AIConfig = {
+    provider: rawProvider,
+    model: stringField(body, "model", 120)
   };
-  const model = explicitModel || defaults[provider];
-  if (!model) throw new Error("請指定 AI model");
-  return { provider, model };
+  if (rawProvider === "openai-compatible") config.baseUrl = stringField(body, "baseUrl", 500);
+  return config;
 }
 
 function isAIProvider(value: string): value is AIConfig["provider"] {
@@ -92,24 +98,12 @@ async function readJson(request: Request): Promise<JsonObject> {
   return data as JsonObject;
 }
 
-function stringField(body: JsonObject, key: string): string {
+function stringField(body: JsonObject, key: string, maxLength = 200): string {
   const value = body[key];
   if (typeof value !== "string" || !value.trim()) throw new Error(`${key} 為必填字串`);
-  return value.trim();
-}
-
-function optionalStringField(body: JsonObject, key: string): string {
-  const value = body[key];
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function numberField(body: JsonObject, key: string, fallback: number): number {
-  const value = body[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.trunc(value)));
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) throw new Error(`${key} 長度超過限制`);
+  return trimmed;
 }
 
 function randomRoomCode(): string {
