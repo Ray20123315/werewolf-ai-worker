@@ -10,7 +10,7 @@ UI、角色名稱、角色說明、辯論改寫說明、系統訊息與其他規
 
 ## 玩家聊天與正式發言
 
-玩家自行輸入的 `chat` 與 `speech` 文字無法預先列入固定翻譯表，因此跨語言顯示時使用 Google Cloud Translation Basic v2。
+玩家自行輸入的 `chat` 與 `speech` 文字無法預先列入固定翻譯表，因此跨語言顯示時使用 Google Cloud Translation Basic v2 的傳統機器翻譯服務。
 
 Google Translation 只負責玩家自由文字，不負責角色、UI、系統訊息或規則文字。翻譯失敗時保留原文，不阻塞遊戲。
 
