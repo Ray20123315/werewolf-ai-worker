@@ -2,7 +2,5 @@
 # Game AI is optional. When a host adds an AI player, that host supplies 1-8 API Keys in the browser.
 # The game-AI keys are used transiently for the requested AI turn and are not stored in Durable Object state.
 #
-# Trilingual live translation uses Google Cloud Translation Basic v2.
-# For local development only, copy this file to .dev.vars and set real keys there (never commit .dev.vars):
-# GOOGLE_TRANSLATE_API_KEYS=google-key-1,google-key-2
-# Production should use: npx wrangler secret put GOOGLE_TRANSLATE_API_KEYS
+# Player chat/speech translation follows the Userscript-style Google translate.googleapis.com `client=gtx` request
+# with MyMemory as a fallback. It does not require a Google Cloud Translation API key or Worker Secret.
