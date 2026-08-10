@@ -1,6 +1,7 @@
 export { GameRoom } from "./room";
 import { ROLE_LIST } from "./roles";
 import type { AIConfig } from "./types";
+import { normalizeTranslationLocale, translateTexts, validateTranslationTexts } from "./translate";
 
 type JsonObject = Record<string, unknown>;
 
@@ -36,6 +37,21 @@ export default {
           }
         }
         throw new Error("建立房間失敗，請重試");
+      }
+
+
+      const translate = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/translate$/);
+      if (translate && request.method === "POST") {
+        const body = await readJson(request);
+        const room = env.GAME_ROOM.getByName(translate[1]!);
+        const token = stringField(body, "token");
+        await room.getStateByToken(token);
+        const targetLocale = normalizeTranslationLocale(body.targetLocale);
+        if (!targetLocale) throw new Error("targetLocale 無效");
+        const sourceLocale = body.sourceLocale === undefined ? undefined : normalizeTranslationLocale(body.sourceLocale);
+        if (body.sourceLocale !== undefined && !sourceLocale) throw new Error("sourceLocale 無效");
+        const texts = validateTranslationTexts(body.texts);
+        return json({ translations: await translateTexts(env.AI as unknown as { run(model: string, input: unknown): Promise<unknown> }, texts, targetLocale, sourceLocale), targetLocale });
       }
 
       const roomInfo = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/info$/);

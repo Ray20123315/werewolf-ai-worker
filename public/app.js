@@ -1,3 +1,14 @@
+import {
+  displayText,
+  ensureTranslations,
+  getLocale,
+  intlLocale,
+  knownText,
+  localizeDom,
+  setLocale,
+  siteTitle
+} from "./i18n.js";
+
 const $ = (selector) => document.querySelector(selector);
 const landing = $("#landing");
 const roomGate = $("#roomGate");
@@ -19,6 +30,15 @@ let ws = null;
 let reconnectTimer = null;
 let roomInfo = null;
 
+const languageSelect = $("#languageSelect");
+if (languageSelect) languageSelect.value = getLocale();
+await localizeDom(document);
+languageSelect?.addEventListener("change", async (event) => {
+  setLocale(event.target.value);
+  if (state) render();
+  else await localizeCurrentView();
+});
+
 await bootstrap();
 
 async function bootstrap() {
@@ -26,13 +46,14 @@ async function bootstrap() {
     const roles = await api("/api/roles");
     roleList = roles.roles || [];
     roleById = new Map(roleList.map((role) => [role.id, role]));
-    $("#roleCountFact").textContent = String(roleList.length);
+    if ($("#roleCountFact")) $("#roleCountFact").textContent = String(roleList.length);
   } catch (error) {
     showError(error);
   }
 
   if (!roomId) {
     landing.classList.remove("hidden");
+    await localizeCurrentView();
     return;
   }
   await openRoomRoute();
@@ -42,7 +63,7 @@ async function openRoomRoute() {
   try {
     roomInfo = await api(`/api/rooms/${roomId}/info`);
     $("#gateRoomCode").textContent = roomId;
-    document.title = `${roomId} · 狼人議會`;
+    document.title = `${roomId} · ${siteTitle()}`;
     const needsPassword = Boolean(roomInfo.requiresRoomPassword);
     $("#roomPasswordNotice").classList.toggle("hidden", !needsPassword);
     document.querySelectorAll(".room-password-field").forEach((el) => el.classList.toggle("hidden", !needsPassword));
@@ -59,6 +80,7 @@ async function openRoomRoute() {
   } catch (error) {
     showGate();
     $("#gateHint").textContent = "找不到這個房間，或房間暫時無法讀取。";
+    void localizeCurrentView();
     showError(error);
   }
 }
@@ -145,7 +167,7 @@ $("#chatForm").addEventListener("submit", (event) => {
   const input = $("#chatInput");
   const content = input.value.trim();
   if (!content) return;
-  send({ type: "chat", content });
+  send({ type: "chat", content, locale: getLocale() });
   input.value = "";
 });
 
@@ -233,6 +255,7 @@ function showGate() {
   game.classList.add("hidden");
   roomGate.classList.remove("hidden");
   leaveButton.classList.add("hidden");
+  void localizeCurrentView();
 }
 
 function connectWebSocket() {
@@ -277,6 +300,7 @@ function render() {
   renderNotice();
   renderChatState();
   renderLegacyPasswordUpgrade();
+  void localizeCurrentView();
 }
 
 function renderPlayers() {
@@ -292,18 +316,36 @@ function renderPlayers() {
     if (state.phase === "debate" && state.currentSpeakerId === p.id) tags.push('<span class="pill speaker">發言中</span>');
     const reveal = p.role ? `<small class="role-reveal">${escapeHtml(roleName(p.role))}</small>` : "";
     const kick = state.me.isHost && p.id !== state.me.id ? `<button class="kick-button" data-kick="${p.id}" type="button">踢出</button>` : "";
-    return `<article class="player-row ${!p.alive ? "is-dead" : ""}"><div><div class="player-name"><strong>${escapeHtml(p.name)}</strong>${tags.join("")}</div>${reveal}</div>${kick}</article>`;
+    return `<article class="player-row ${!p.alive ? "is-dead" : ""}"><div><div class="player-name"><strong data-no-translate>${escapeHtml(p.name)}</strong>${tags.join("")}</div>${reveal}</div>${kick}</article>`;
   }).join("");
-  document.querySelectorAll("[data-kick]").forEach((button) => button.addEventListener("click", () => {
-    if (confirm(`確定踢出 ${nameOf(button.dataset.kick)}？被踢者不是永久封鎖，可重新加入。`)) send({ type: "kick", targetId: button.dataset.kick });
+  document.querySelectorAll("[data-kick]").forEach((button) => button.addEventListener("click", async () => {
+    const prompt = await localizedRuntime(`確定踢出 ${nameOf(button.dataset.kick)}？被踢者不是永久封鎖，可重新加入。`);
+    if (confirm(prompt)) send({ type: "kick", targetId: button.dataset.kick });
   }));
 }
 
 function renderMessages() {
   const box = $("#messages");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  box.innerHTML = state.messages.map((m) => `<article class="message message-${m.kind}"><div class="message-head"><strong>${escapeHtml(m.playerName)}</strong><span>${formatTime(m.createdAt)}</span></div><p>${escapeHtml(m.content)}</p></article>`).join("");
+  const pendingBySource = new Map();
+  box.innerHTML = state.messages.map((m) => {
+    const sourceLocale = m.sourceLocale || "zh-TW";
+    let content = displayText(m.content, sourceLocale);
+    if (content === null) {
+      content = knownText("翻譯中…");
+      const list = pendingBySource.get(sourceLocale) || [];
+      list.push(m.content);
+      pendingBySource.set(sourceLocale, list);
+    }
+    const shownName = m.kind === "system" ? knownText("系統") : m.playerName;
+    return `<article class="message message-${m.kind}" data-no-translate><div class="message-head"><strong>${escapeHtml(shownName)}</strong><span>${formatTime(m.createdAt)}</span></div><p class="message-content" title="${escapeAttr(content)}">${escapeHtml(content)}</p></article>`;
+  }).join("");
   if (atBottom) box.scrollTop = box.scrollHeight;
+  for (const [sourceLocale, texts] of pendingBySource) {
+    void ensureTranslations(texts, sourceLocale, translateBatchRemote).then(() => {
+      if (state) renderMessages();
+    });
+  }
 }
 
 function renderActionArea() {
@@ -414,7 +456,7 @@ function renderDebateAction(area) {
   $("#submitSpeech")?.addEventListener("click", () => {
     const content = $("#debateSpeech").value.trim();
     if (content.length < 2) return showToast("正式發言至少 2 個字元", true);
-    send({ type: "debate_speech", content });
+    send({ type: "debate_speech", content, locale: getLocale() });
   });
   bindGenericRoleAction();
 }
@@ -521,10 +563,12 @@ function roleCard(role) {
   return `<article class="role-card" data-role-card="${role.id}"><div class="role-copy"><div class="role-title"><strong>${escapeHtml(role.name)}</strong><span>${role.source === "official" ? "原作" : role.source === "adapted" ? "辯論改寫" : "討論角色"}</span></div><p>${escapeHtml(role.summary)}</p>${adaptation}</div><label class="count-box"><span>數量</span><input data-role-count="${role.id}" type="number" min="0" step="1" value="${count}" /></label></article>`;
 }
 
-function filterRoleCatalog(query) { renderRoleCatalog(query); }
+function filterRoleCatalog(query) { renderRoleCatalog(query); void localizeCurrentView(); }
 function roleMatches(role, query) {
   if (!query) return true;
-  return `${role.name} ${role.id} ${role.summary} ${factionNames[role.faction] || role.faction} ${role.debateAdaptation || ""}`.toLowerCase().includes(query.toLowerCase());
+  const localized = [role.name, role.summary, role.debateAdaptation || "", factionNames[role.faction] || role.faction]
+    .map((text) => displayText(text, "zh-TW") || "").join(" ");
+  return `${role.name} ${role.id} ${role.summary} ${factionNames[role.faction] || role.faction} ${role.debateAdaptation || ""} ${localized}`.toLowerCase().includes(query.toLowerCase());
 }
 
 function updateRoleTotalFromInputs() {
@@ -590,9 +634,37 @@ function formalPlayers() { return (state?.players || []).filter((p) => !p.isSpec
 function alivePlayers() { return formalPlayers().filter((p) => p.alive); }
 function roleName(id) { return roleById.get(id)?.name || id; }
 function nameOf(id) { return state?.players.find((p) => p.id === id)?.name || "未知玩家"; }
-function optionFor(id) { return `<option value="${escapeAttr(id)}">${escapeHtml(nameOf(id))}</option>`; }
+function optionFor(id) { return `<option value="${escapeAttr(id)}" data-no-translate>${escapeHtml(nameOf(id))}</option>`; }
 function tieRuleLabel(rule) { return ({ no_elimination: "平票無人出局", revote: "全場重投", pk_revote: "平票玩家 PK 後重投" })[rule] || rule; }
 function optionLabel(value) { return ({ heal: "解藥", poison: "毒藥", pass: "跳過", nullify: "使技能失效", freeze: "凍結", detonate: "引爆凍結", day: "白陽祝福", night: "夜陰祝福", block: "封鎖技能", substitute: "死亡替換", village: "支持好人", werewolf: "支持狼人", spirit: "支持怨靈" })[value] || value; }
+
+async function translateBatchRemote(texts, sourceLocale, targetLocale) {
+  if (!session || !roomId || !Array.isArray(texts) || texts.length === 0) return texts;
+  if (sourceLocale && sourceLocale !== "auto" && sourceLocale === targetLocale) return texts;
+  const output = [];
+  for (let i = 0; i < texts.length; i += 40) {
+    const chunk = texts.slice(i, i + 40);
+    const body = { token: session.token, targetLocale, texts: chunk };
+    if (sourceLocale && sourceLocale !== "auto") body.sourceLocale = sourceLocale;
+    const data = await api(`/api/rooms/${roomId}/translate`, { method: "POST", body });
+    if (!Array.isArray(data.translations) || data.translations.length !== chunk.length) throw new Error("翻譯服務回傳格式錯誤");
+    output.push(...data.translations.map((text, index) => typeof text === "string" && text.trim() ? text : chunk[index]));
+  }
+  return output;
+}
+
+async function localizedRuntime(source, sourceLocale = "zh-TW") {
+  const immediate = displayText(source, sourceLocale);
+  if (immediate !== null) return immediate;
+  if (!session || !roomId) return knownText(source);
+  await ensureTranslations([source], sourceLocale, translateBatchRemote);
+  return displayText(source, sourceLocale) || source;
+}
+
+async function localizeCurrentView() {
+  document.title = roomId ? `${roomId} · ${siteTitle()}` : siteTitle();
+  await localizeDom(document, session && roomId ? translateBatchRemote : undefined);
+}
 
 function send(payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return showToast("WebSocket 尚未連線", true);
@@ -627,8 +699,22 @@ function aiKeyStorageKey() { return `werewolf-ai-keys:${roomId || "none"}`; }
 function readAIKeys() { try { return JSON.parse(sessionStorage.getItem(aiKeyStorageKey()) || "{}"); } catch { return {}; } }
 function writeAIKeys(keys) { sessionStorage.setItem(aiKeyStorageKey(), JSON.stringify(keys)); }
 
-function formatTime(value) { try { return new Intl.DateTimeFormat("zh-TW", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); } catch { return ""; } }
-function showToast(message, isError = false) { toast.textContent = String(message); toast.classList.remove("hidden"); toast.classList.toggle("error", isError); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.add("hidden"), 3600); }
+function formatTime(value) { try { return new Intl.DateTimeFormat(intlLocale(), { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); } catch { return ""; } }
+function showToast(message, isError = false, sourceLocale = "zh-TW") {
+  const raw = String(message);
+  const immediate = displayText(raw, sourceLocale);
+  toast.dataset.sourceMessage = raw;
+  toast.textContent = immediate ?? raw;
+  toast.classList.remove("hidden");
+  toast.classList.toggle("error", isError);
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.add("hidden"), 3600);
+  if (immediate === null && session && roomId) {
+    void ensureTranslations([raw], sourceLocale, translateBatchRemote).then(() => {
+      if (toast.dataset.sourceMessage === raw) toast.textContent = displayText(raw, sourceLocale) || raw;
+    });
+  }
+}
 function showError(error) { showToast(error instanceof Error ? error.message : String(error), true); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]); }
 function escapeAttr(value) { return escapeHtml(value); }

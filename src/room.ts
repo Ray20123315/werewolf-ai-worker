@@ -30,6 +30,7 @@ import {
 import { ROLE_LIST, roleDefinition } from "./roles";
 import type {
   AIConfig,
+  AppLocale,
   ChatMessage,
   ClientMessage,
   Faction,
@@ -253,13 +254,13 @@ export class GameRoom extends DurableObject<Env> {
       case "start": return this.startGame(token);
       case "reset": return this.resetGame(token);
       case "set_password": return this.setPlayerPassword(token, command.password);
-      case "chat": return this.sendChat(token, command.content);
+      case "chat": return this.sendChat(token, command.content, command.locale);
       case "configure_roles": return this.configureRoles(token, command.roles);
       case "configure_settings": return this.configureSettings(token, command.settings);
       case "kick": return this.kickPlayer(token, command.targetId);
       case "sheriff_candidate": return this.setSheriffCandidate(token, command.running);
       case "sheriff_vote": return this.castSheriffVote(token, command.targetId);
-      case "debate_speech": return this.submitDebateSpeech(token, command.content);
+      case "debate_speech": return this.submitDebateSpeech(token, command.content, command.locale);
       case "vote": return this.castVote(token, command.targetId);
       case "night_action": return this.submitNightAction(token, command.action);
       case "role_action": return this.submitRoleAction(token, command.effect, command.targetIds ?? [], command.option);
@@ -390,12 +391,12 @@ export class GameRoom extends DurableObject<Env> {
     this.saveBroadcast(state);
   }
 
-  private sendChat(token: string, content: string): void {
+  private sendChat(token: string, content: string, locale?: AppLocale): void {
     const state = this.requireState();
     const actor = this.playerByToken(state, token);
     if (state.phase === "night") throw new Error("夜晚為秘密行動階段，公開聊天室暫停");
     if (actor.isSpectator && state.phase !== "lobby" && state.phase !== "ended") throw new Error("觀戰者在進行中的對局不能向存活玩家發言");
-    state.messages.push(this.chatMessage(state, actor, this.normalizeChat(content)));
+    state.messages.push(this.chatMessage(state, actor, this.normalizeChat(content), this.normalizeMessageLocale(locale)));
     this.trimMessages(state);
     this.saveBroadcast(state);
   }
@@ -797,20 +798,20 @@ export class GameRoom extends DurableObject<Env> {
     if (state.debateOrder.length === 0) this.enterVote(state);
   }
 
-  private submitDebateSpeech(token: string, content: string): void {
+  private submitDebateSpeech(token: string, content: string, locale?: AppLocale): void {
     const state = this.requireState();
     if (state.phase !== "debate") throw new Error("目前不是正式辯論階段");
     const actor = this.playerByToken(state, token);
     if (!actor.alive || actor.isSpectator) throw new Error("目前不能參與正式辯論");
     if (currentDebaterId(state.debateOrder, state.debateIndex) !== actor.id) throw new Error("尚未輪到你正式發言");
     if (actor.isAI) throw new Error("AI 玩家由房主透過 BYOK 執行");
-    this.recordDebateSpeech(state, actor, this.normalizeSpeech(content));
+    this.recordDebateSpeech(state, actor, this.normalizeSpeech(content), this.normalizeMessageLocale(locale));
     if (isDebateComplete(state.debateOrder, state.debateIndex)) this.enterVote(state);
     else this.saveBroadcast(state);
   }
 
-  private recordDebateSpeech(state: GameState, actor: Player, text: string): void {
-    state.messages.push(this.speechMessage(state, actor, text));
+  private recordDebateSpeech(state: GameState, actor: Player, text: string, locale: AppLocale = "zh-TW"): void {
+    state.messages.push(this.speechMessage(state, actor, text, locale));
     state.debateCompleted.push(actor.id);
     const respondingNobles = livingPlayers(state.players).filter((p) => p.role === "noble" && this.mem(state, p.id).replyTarget === actor.id);
     for (const noble of respondingNobles) {
@@ -1493,14 +1494,16 @@ export class GameRoom extends DurableObject<Env> {
   private systemMem(state: GameState): Record<string, RoleMemoryValue> { return this.mem(state, "__system"); }
   private asStringArray(value: RoleMemoryValue | undefined): string[] { return Array.isArray(value) && value.every((v) => typeof v === "string") ? [...value] : []; }
 
-  private addSystemMessage(state: GameState, content: string): void { state.messages.push({ id: crypto.randomUUID(), playerName: "系統", content, kind: "system", createdAt: Date.now(), round: state.round, phase: state.phase }); this.trimMessages(state); }
-  private speechMessage(state: GameState, player: Player, content: string): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, kind: "speech", createdAt: Date.now(), round: state.round, phase: state.phase }; }
-  private chatMessage(state: GameState, player: Player, content: string): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, kind: "chat", createdAt: Date.now(), round: state.round, phase: state.phase }; }
+  private addSystemMessage(state: GameState, content: string): void { state.messages.push({ id: crypto.randomUUID(), playerName: "系統", content, sourceLocale: "zh-TW", kind: "system", createdAt: Date.now(), round: state.round, phase: state.phase }); this.trimMessages(state); }
+  private speechMessage(state: GameState, player: Player, content: string, sourceLocale: AppLocale = "zh-TW"): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, sourceLocale, kind: "speech", createdAt: Date.now(), round: state.round, phase: state.phase }; }
+  private chatMessage(state: GameState, player: Player, content: string, sourceLocale: AppLocale = "zh-TW"): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, sourceLocale, kind: "chat", createdAt: Date.now(), round: state.round, phase: state.phase }; }
   private trimMessages(state: GameState): void { if (state.messages.length > 500) state.messages = state.messages.slice(-500); }
   private normalizeSpeech(content: string): string { const text = content.trim().replace(/\s+/g, " ").slice(0, 900); if (text.length < 2) throw new Error("正式發言至少需要 2 個字元"); return text; }
   private normalizeChat(content: string): string { const text = content.trim().replace(/\s+/g, " ").slice(0, 500); if (!text) throw new Error("聊天訊息不能為空白"); return text; }
   private nameOf(state: GameState, id: string): string { return state.players.find((p) => p.id === id)?.name ?? "未知玩家"; }
   private factionName(faction: Faction): string { return ({ village: "好人陣營", werewolf: "狼人陣營", spirit: "怨靈陣營", neutral: "特殊角色", blood: "血族陣營" } satisfies Record<Faction, string>)[faction]; }
+
+  private normalizeMessageLocale(locale?: AppLocale): AppLocale { return locale === "zh-CN" || locale === "en" ? locale : "zh-TW"; }
 
   private closePlayerSockets(playerId: string, code: number, reason: string): void { for (const ws of this.ctx.getWebSockets()) { const a = ws.deserializeAttachment() as SocketAttachment | null; if (a?.playerId === playerId) ws.close(code, reason); } }
   private broadcast(state: GameState): void { for (const ws of this.ctx.getWebSockets()) { const a = ws.deserializeAttachment() as SocketAttachment | null; if (!a) continue; try { ws.send(JSON.stringify({ type: "state", state: this.projectState(state, a.token) } satisfies ServerMessage)); } catch { ws.close(1008, "Invalid session"); } } }

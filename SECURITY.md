@@ -20,7 +20,20 @@ This project uses BYOK (bring your own key) for optional AI players.
 - The Worker/Durable Object does not write the API Key to GameState, Durable Object storage, source code, repository configuration, or application logs.
 - Custom OpenAI-compatible Base URLs must use HTTPS.
 
-## 3. Private game information
+
+## 3. Translation data path
+
+The trilingual UI supports Traditional Chinese, Simplified Chinese, and English. Dynamic cross-language text is translated with the deployment's Cloudflare Workers AI binding.
+
+- Translation does **not** use or expose the host's BYOK game-AI credentials.
+- `/api/rooms/:roomId/translate` requires a valid room/player session before inference is allowed.
+- Translation requests are bounded by item count, per-item length, and total request length.
+- Player chat and formal speeches remain canonical in their original text in room state, with source-locale metadata. Translation changes presentation only.
+- Translated variants are cached only in the viewer's current page memory by the client implementation; they are not written back into the canonical room state.
+- When a viewer requests another language, the relevant text is sent to Cloudflare Workers AI for translation. Deployers should account for Workers AI privacy/usage policy and billing.
+- Translation failure falls back to the original text and never blocks chat, debate progression, or voting.
+
+## 4. Private game information
 
 The canonical room state remains server-side in a `GameRoom` Durable Object. Clients receive a personalized projection only.
 
@@ -30,10 +43,10 @@ The canonical room state remains server-side in a `GameRoom` Durable Object. Cli
 - Spectators joining an active game do not receive a new role.
 - Full roles are revealed when the game ends, except special private-information roles receive only what their role permits during play.
 
-## 4. Debate-mode security invariant
+## 5. Debate-mode security invariant
 
 Free chat cannot advance the formal debate state. Server-side state validates the current formal speaker and only moves to voting after the debate order is complete. Physical/PvP mechanics from the Minecraft source material are not trusted client actions and are not part of this implementation.
 
-## 5. Reporting
+## 6. Reporting
 
 Do not post API Keys, room passwords, player passwords, session tokens, or private role state in a public issue. Provide the minimum reproducible information needed to investigate a security problem.

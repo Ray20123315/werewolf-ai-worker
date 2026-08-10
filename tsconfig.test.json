@@ -11,5 +11,5 @@
     "rootDir": "src",
     "outDir": ".test-build"
   },
-  "include": ["src/types.ts", "src/roles.ts", "src/auth.ts", "src/game-engine.ts"]
+  "include": ["src/types.ts", "src/roles.ts", "src/auth.ts", "src/translate.ts", "src/game-engine.ts"]
 }

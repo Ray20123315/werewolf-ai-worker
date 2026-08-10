@@ -1,6 +1,6 @@
-# 狼人議會 — Cloudflare Workers 辯論式狼人殺
+# 狼人殺 — Cloudflare Workers 辯論式狼人殺
 
-**狼人議會**是一個部署於 Cloudflare Workers 的即時多人狼人殺 Web App。每個房間由一個 Durable Object 維護 authoritative state，前端使用 WebSocket 即時同步。
+**狼人殺**是一個部署於 Cloudflare Workers 的即時多人狼人殺 Web App。每個房間由一個 Durable Object 維護 authoritative state，前端使用 WebSocket 即時同步。
 
 本專案只有一個玩法核心：**辯論式，不做暴民式。**
 
@@ -117,9 +117,18 @@ stateDiagram-v2
 - 出局者與進行中觀戰者不能向存活玩家公開發言。
 - 船長依角色設定知道全角色，但不進正式發言順序。
 
+### 三語與即時翻譯
+
+- UI 支援 `zh-TW`（繁體中文）、`zh-CN`（简体中文）、`en`（English），選擇會保存在瀏覽器。
+- 玩家送出的聊天與正式發言保留原文，並附上發送端語系 metadata；翻譯只影響每位觀看者的顯示。
+- 若觀看者語言不同，前端透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求翻譯；翻譯失敗時顯示原文，不阻塞遊戲流程。
+- 動態角色名稱／技能說明、系統訊息、錯誤與階段文字也會依觀看者語言翻譯。
+- 翻譯端點要求有效房間 session，並限制單次筆數與總文字長度，避免成為公開無限制推論代理。
+- 翻譯使用 Cloudflare Workers AI binding，不需要玩家提供翻譯 API Key；這與可選的 BYOK 遊戲 AI 是兩個不同功能。
+
 ---
 
-## 6. AI：完全選用 + BYOK
+## 6. 遊戲 AI：完全選用 + BYOK
 
 純真人房不需要任何 AI Provider。
 
@@ -142,6 +151,7 @@ stateDiagram-v2
 ├─ public/
 │  ├─ index.html
 │  ├─ styles.css
+│  ├─ i18n.js
 │  └─ app.js
 ├─ src/
 │  ├─ index.ts
@@ -149,6 +159,7 @@ stateDiagram-v2
 │  ├─ game-engine.ts
 │  ├─ roles.ts
 │  ├─ auth.ts
+│  ├─ translate.ts
 │  ├─ ai.ts
 │  └─ types.ts
 ├─ docs/
@@ -198,10 +209,10 @@ npx wrangler deploy
 
 也可使用 Cloudflare Workers Builds 連接 GitHub，Production branch 指向 `main`。
 
-本 repository 不需要部署者提供共享 AI API Key。
+本 repository 不需要部署者提供共享遊戲 AI API Key。三語即時翻譯使用 `wrangler.jsonc` 中的 Cloudflare Workers AI binding (`AI`)，不需要額外 API Key，但會使用部署帳號的 Workers AI 額度／計費。
 
 ---
 
 ## 10. 安全
 
-請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、BYOK Key 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器。
+請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、BYOK Key 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；聊天／正式發言在跨語言顯示時會送到 Cloudflare Workers AI 做翻譯。

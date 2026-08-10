@@ -36,6 +36,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .brand b { display: block; font-size: 19px; letter-spacing: .04em; }
 .brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; letter-spacing: .18em; }
 .brand-actions { display: flex; align-items: center; gap: 10px; }
+.language-select { min-width: 118px; width: auto; margin: 0; padding: 7px 30px 7px 10px; border-radius: 999px; background: rgba(255,255,255,.82); font-size: 11px; font-weight: 700; }
+.translation-pending { color: var(--muted); font-style: italic; }
+
 .mode-chip, .pill, .eyebrow { display: inline-flex; align-items: center; width: fit-content; }
 .mode-chip { padding: 7px 10px; border: 1px solid #dbb4ae; border-radius: 999px; color: var(--accent); background: #fff8f5; font-size: 11px; font-weight: 750; }
 .panel { border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--paper); box-shadow: var(--shadow); backdrop-filter: blur(14px); }

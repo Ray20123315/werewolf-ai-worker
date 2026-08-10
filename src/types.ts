@@ -119,6 +119,7 @@ export type Role = typeof ROLE_IDS[number];
 export type Phase = "lobby" | "sheriff" | "night" | "debate" | "vote" | "reaction" | "ended";
 export type Faction = "village" | "werewolf" | "spirit" | "neutral" | "blood";
 export type Team = Faction;
+export type AppLocale = "zh-TW" | "zh-CN" | "en";
 export type AIProvider = "openai" | "gemini" | "deepseek" | "openai-compatible";
 export type AIOperation = "night_action" | "debate_speech" | "vote" | "role_action";
 export type RoleActionTiming = "setup" | "sheriff" | "night" | "day" | "vote" | "reaction" | "passive";
@@ -244,6 +245,7 @@ export interface ChatMessage {
   playerId?: string;
   playerName: string;
   content: string;
+  sourceLocale?: AppLocale;
   kind: "chat" | "speech" | "system" | "role";
   createdAt: number;
   round: number;
@@ -414,13 +416,13 @@ export type ClientMessage =
   | { type: "start" }
   | { type: "reset" }
   | { type: "set_password"; password: string }
-  | { type: "chat"; content: string }
+  | { type: "chat"; content: string; locale?: AppLocale }
   | { type: "configure_roles"; roles: RoleSetup }
   | { type: "configure_settings"; settings: Partial<GameSettings> }
   | { type: "kick"; targetId: string }
   | { type: "sheriff_candidate"; running: boolean }
   | { type: "sheriff_vote"; targetId: string }
-  | { type: "debate_speech"; content: string }
+  | { type: "debate_speech"; content: string; locale?: AppLocale }
   | { type: "vote"; targetId: string }
   | { type: "night_action"; action: NightClientAction }
   | { type: "role_action"; effect: RoleActionEffect; targetIds?: string[]; option?: string };
