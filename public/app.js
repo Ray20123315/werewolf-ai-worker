@@ -190,6 +190,7 @@ $("#settingsForm").addEventListener("submit", (event) => {
 
 $("#roleSetupForm").addEventListener("submit", (event) => {
   event.preventDefault();
+  if ($("#autoRoleSetup")?.checked) return showToast("自動配置角色已啟用；取消勾選後才能手動調整", true);
   const roles = {};
   document.querySelectorAll("[data-role-count]").forEach((input) => {
     const value = Math.max(0, Number.parseInt(input.value || "0", 10) || 0);
@@ -197,6 +198,11 @@ $("#roleSetupForm").addEventListener("submit", (event) => {
   });
   send({ type: "configure_roles", roles });
   showToast("角色配置已送出");
+});
+
+$("#autoRoleSetup").addEventListener("change", (event) => {
+  send({ type: "configure_settings", settings: { autoRoleSetup: Boolean(event.target.checked) } });
+  showToast(event.target.checked ? "已啟用自動配置角色" : "已切換為手動角色配置");
 });
 
 $("#zeroRoles").addEventListener("click", () => {
@@ -217,6 +223,8 @@ $("#addAIForm").addEventListener("submit", async (event) => {
   if (!session || !roomId) return;
   const form = new FormData(event.currentTarget);
   const provider = String(form.get("provider"));
+  const apiKeys = parseApiKeyPool(form.get("apiKeys"));
+  if (!apiKeys.length) return showToast("請至少輸入 1 組 API Key", true);
   try {
     const result = await api(`/api/rooms/${roomId}/ai`, {
       method: "POST",
@@ -229,13 +237,13 @@ $("#addAIForm").addEventListener("submit", async (event) => {
       }
     });
     const keys = readAIKeys();
-    keys[result.playerId] = String(form.get("apiKey") || "");
+    keys[result.playerId] = apiKeys;
     writeAIKeys(keys);
     event.currentTarget.reset();
     $("#aiProvider").value = "openai";
     $("#aiModel").value = providerDefaults.openai;
     $("#aiBaseUrlRow").classList.add("hidden");
-    showToast("AI 已加入；API Key 只保留在這個瀏覽器 session");
+    showToast(`AI 已加入；${apiKeys.length} 組 API Key 只保留在這個瀏覽器 session`);
   } catch (error) { showError(error); }
 });
 
@@ -530,10 +538,16 @@ function renderHostPanel() {
   panel.classList.toggle("hidden", !state.me.isHost);
   if (!state.me.isHost) return;
   const lobby = state.phase === "lobby";
-  panel.querySelectorAll("#settingsForm input, #settingsForm select, #roleSetupForm input, #zeroRoles").forEach((el) => { el.disabled = !lobby; });
+  const autoRoles = Boolean(state.settings.autoRoleSetup);
+  panel.querySelectorAll("#settingsForm input, #settingsForm select").forEach((el) => { el.disabled = !lobby; });
   $("#settingsForm").elements.sheriffEnabled.checked = Boolean(state.settings.sheriffEnabled);
   $("#settingsForm").elements.deathInfo.value = state.settings.deathInfo;
   $("#settingsForm").elements.tieRule.value = state.settings.tieRule;
+  $("#autoRoleSetup").checked = autoRoles;
+  $("#autoRoleSetup").disabled = !lobby;
+  $("#roleSearch").disabled = !lobby || autoRoles;
+  $("#zeroRoles").disabled = !lobby || autoRoles;
+  $("#roleSetupForm").querySelector('button[type="submit"]').disabled = !lobby || autoRoles;
   renderRoleCatalog();
   $("#startButton").classList.toggle("hidden", !lobby);
   $("#startButton").disabled = !state.canStart;
@@ -553,7 +567,10 @@ function renderRoleCatalog() {
     return `<section class="role-group" data-role-group="${faction}"><div class="role-group-head"><strong>${escapeHtml(factionNames[faction] || faction)}</strong><span>${roles.length} 種</span></div>${roles.map((role) => roleCard(role)).join("")}</section>`;
   }).join("");
   box.innerHTML = groups || '<p class="empty-state">沒有符合搜尋的角色。</p>';
-  box.querySelectorAll("[data-role-count]").forEach((input) => input.addEventListener("input", updateRoleTotalFromInputs));
+  box.querySelectorAll("[data-role-count]").forEach((input) => {
+    input.disabled = state.phase !== "lobby" || Boolean(state.settings.autoRoleSetup);
+    input.addEventListener("input", updateRoleTotalFromInputs);
+  });
   updateRoleTotalFromInputs();
 }
 
@@ -582,12 +599,12 @@ function renderPendingAI() {
   const box = $("#pendingAIBox");
   if (!state.pendingAI) return box.classList.add("hidden");
   const player = state.players.find((p) => p.id === state.pendingAI.playerId);
-  const key = readAIKeys()[state.pendingAI.playerId];
+  const keys = readAIKeys()[state.pendingAI.playerId] || [];
   box.classList.remove("hidden");
-  box.innerHTML = `<strong>AI 待辦：${escapeHtml(player?.name || "AI")}</strong><p>${escapeHtml(state.pendingAI.operation)} · ${key ? "本 session 已有 API Key" : "缺少 API Key，請重新加入該 AI 或在此瀏覽器設定"}</p><button id="runAIButton" class="button button-primary full" type="button" ${key ? "" : "disabled"}>執行這次 AI 操作</button>`;
+  box.innerHTML = `<strong>AI 待辦：${escapeHtml(player?.name || "AI")}</strong><p>${escapeHtml(state.pendingAI.operation)} · ${keys.length ? `本 session 有 ${keys.length} 組 API Key，可自動切換` : "缺少 API Key，請重新加入該 AI 或在此瀏覽器設定"}</p><button id="runAIButton" class="button button-primary full" type="button" ${keys.length ? "" : "disabled"}>執行這次 AI 操作</button>`;
   $("#runAIButton")?.addEventListener("click", async () => {
     try {
-      await api(`/api/rooms/${roomId}/ai/run`, { method: "POST", body: { token: session.token, playerId: state.pendingAI.playerId, apiKey: key } });
+      await api(`/api/rooms/${roomId}/ai/run`, { method: "POST", body: { token: session.token, playerId: state.pendingAI.playerId, apiKeys: keys } });
       showToast("AI 操作已完成");
     } catch (error) { showError(error); }
   });
@@ -696,7 +713,21 @@ function saveSession(id, token, playerId) { localStorage.setItem(sessionKey(id),
 function setSession(id, token, playerId) { saveSession(id, token, playerId); session = { roomId: id, token, playerId }; }
 function clearSession(id) { localStorage.removeItem(sessionKey(id)); }
 function aiKeyStorageKey() { return `werewolf-ai-keys:${roomId || "none"}`; }
-function readAIKeys() { try { return JSON.parse(sessionStorage.getItem(aiKeyStorageKey()) || "{}"); } catch { return {}; } }
+function parseApiKeyPool(value) {
+  return [...new Set(String(value || "").split(/[\n,;]+/g).map((item) => item.trim()).filter(Boolean))].slice(0, 8);
+}
+function readAIKeys() {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(aiKeyStorageKey()) || "{}");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const normalized = {};
+    for (const [playerId, value] of Object.entries(raw)) {
+      const keys = Array.isArray(value) ? value : [value];
+      normalized[playerId] = [...new Set(keys.filter((item) => typeof item === "string").map((item) => item.trim()).filter(Boolean))].slice(0, 8);
+    }
+    return normalized;
+  } catch { return {}; }
+}
 function writeAIKeys(keys) { sessionStorage.setItem(aiKeyStorageKey(), JSON.stringify(keys)); }
 
 function formatTime(value) { try { return new Intl.DateTimeFormat(intlLocale(), { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); } catch { return ""; } }

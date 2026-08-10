@@ -1,18 +1,19 @@
 export { GameRoom } from "./room";
 import { ROLE_LIST } from "./roles";
 import type { AIConfig } from "./types";
-import { normalizeTranslationLocale, translateTexts, validateTranslationTexts } from "./translate";
+import { normalizeTranslationLocale, parseGoogleTranslateApiKeys, translateTexts, validateTranslationTexts } from "./translate";
 
 type JsonObject = Record<string, unknown>;
+type WorkerEnv = Env & { GOOGLE_TRANSLATE_API_KEYS?: string };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
     try {
       if (request.method === "GET" && url.pathname === "/api/health") {
-        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers", aiMode: "byok", mode: "debate-only" });
+        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers", aiMode: "byok", translation: "google-cloud-v2", mode: "debate-only" });
       }
 
       if (request.method === "GET" && url.pathname === "/api/roles") {
@@ -51,7 +52,8 @@ export default {
         const sourceLocale = body.sourceLocale === undefined ? undefined : normalizeTranslationLocale(body.sourceLocale);
         if (body.sourceLocale !== undefined && !sourceLocale) throw new Error("sourceLocale 無效");
         const texts = validateTranslationTexts(body.texts);
-        return json({ translations: await translateTexts(env.AI as unknown as { run(model: string, input: unknown): Promise<unknown> }, texts, targetLocale, sourceLocale), targetLocale });
+        const translationKeys = parseGoogleTranslateApiKeys(env.GOOGLE_TRANSLATE_API_KEYS);
+        return json({ translations: await translateTexts(fetch, translationKeys, texts, targetLocale, sourceLocale), targetLocale });
       }
 
       const roomInfo = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/info$/);
@@ -60,8 +62,9 @@ export default {
       const aiRun = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/ai\/run$/);
       if (aiRun && request.method === "POST") {
         const body = await readJson(request);
+        const apiKeys = stringArrayField(body, "apiKeys", 8, 1024, body.apiKey);
         return json(await env.GAME_ROOM.getByName(aiRun[1]!).runAI(
-          stringField(body, "token"), stringField(body, "playerId"), stringField(body, "apiKey", 1024)
+          stringField(body, "token"), stringField(body, "playerId"), apiKeys
         ));
       }
 
@@ -95,12 +98,26 @@ export default {
       const status = message.includes("不存在") ? 404
         : message.includes("憑證") || message.includes("只有房主") ? 403
           : message.includes("密碼錯誤") || message.includes("名稱或人物密碼錯誤") ? 401
-            : message.startsWith("AI provider HTTP") ? 502
+            : message.startsWith("AI provider HTTP") || message.startsWith("Google Translation HTTP") ? 502
               : 400;
       return json({ error: message }, status);
     }
   }
 };
+
+function stringArrayField(body: JsonObject, key: string, maxItems: number, maxLength: number, legacy?: unknown): string[] {
+  const raw = body[key] ?? (typeof legacy === "string" ? [legacy] : undefined);
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > maxItems) throw new Error(`${key} 必須包含 1~${maxItems} 組 API Key`);
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") throw new Error(`${key} 內容格式錯誤`);
+    const value = item.trim();
+    if (!value || value.length > maxLength) throw new Error(`${key} 包含無效 API Key`);
+    if (!out.includes(value)) out.push(value);
+  }
+  if (!out.length) throw new Error(`${key} 必須至少有 1 組有效 API Key`);
+  return out;
+}
 
 function parseAIConfig(body: JsonObject): AIConfig {
   const rawProvider = stringField(body, "provider");

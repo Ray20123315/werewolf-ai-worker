@@ -15,22 +15,25 @@
 This project uses BYOK (bring your own key) for optional AI players.
 
 - The deployer does not need shared OpenAI, Gemini, DeepSeek, or custom-provider secrets.
-- The host browser keeps the provider credential in `sessionStorage` for the current browser session.
-- The credential is sent only with the immediate `/api/rooms/:roomId/ai/run` request that needs it.
-- The Worker/Durable Object does not write the API Key to GameState, Durable Object storage, source code, repository configuration, or application logs.
+- Each AI player may have a pool of 1–8 provider API keys. The host browser keeps that pool in `sessionStorage` for the current browser session.
+- The credential pool is sent only with the immediate `/api/rooms/:roomId/ai/run` request that needs it.
+- The Worker tries the next key only for credential, quota/rate-limit, timeout, or transient provider failures. Gameplay validation errors are not retried with another key.
+- The Worker/Durable Object does not write the provider API keys to GameState, Durable Object storage, source code, repository configuration, or application logs.
 - Custom OpenAI-compatible Base URLs must use HTTPS.
-
+- AI formal-speech decisions may include a structured day-action intent. The server re-validates the requested effect, target count, legal targets, and options against the current role prompt. Speech keywords such as “自爆” or “決鬥” do not execute an action by themselves.
 
 ## 3. Translation data path
 
-The trilingual UI supports Traditional Chinese, Simplified Chinese, and English. Dynamic cross-language text is translated with the deployment's Cloudflare Workers AI binding.
+The trilingual UI supports Traditional Chinese (`zh-TW`), Simplified Chinese (`zh-CN`), and English (`en`). Dynamic cross-language text is translated with Google Cloud Translation Basic v2.
 
 - Translation does **not** use or expose the host's BYOK game-AI credentials.
-- `/api/rooms/:roomId/translate` requires a valid room/player session before inference is allowed.
+- The deployment supplies Google Translation credentials through the Worker Secret `GOOGLE_TRANSLATE_API_KEYS`. It accepts 1–8 API keys separated by newline, comma, or semicolon; real keys must never be committed to the repository.
+- `/api/rooms/:roomId/translate` requires a valid room/player session before translation is allowed.
 - Translation requests are bounded by item count, per-item length, and total request length.
 - Player chat and formal speeches remain canonical in their original text in room state, with source-locale metadata. Translation changes presentation only.
 - Translated variants are cached only in the viewer's current page memory by the client implementation; they are not written back into the canonical room state.
-- When a viewer requests another language, the relevant text is sent to Cloudflare Workers AI for translation. Deployers should account for Workers AI privacy/usage policy and billing.
+- When a viewer requests another language, the relevant text is sent to Google Cloud Translation. Deployers should account for Google Cloud privacy, quota, billing, API-key restrictions, and credential rotation.
+- On invalid credentials, quota/rate limiting, or transient service errors, the translation layer may try the next configured Google API key. Other deterministic request errors fail immediately.
 - Translation failure falls back to the original text and never blocks chat, debate progression, or voting.
 
 ## 4. Private game information
@@ -46,6 +49,8 @@ The canonical room state remains server-side in a `GameRoom` Durable Object. Cli
 ## 5. Debate-mode security invariant
 
 Free chat cannot advance the formal debate state. Server-side state validates the current formal speaker and only moves to voting after the debate order is complete. Physical/PvP mechanics from the Minecraft source material are not trusted client actions and are not part of this implementation.
+
+Automatic role setup is also server-authoritative: while enabled, manual role configuration is rejected and the server recomputes the basic setup from the current formal-player count before game start.
 
 ## 6. Reporting
 

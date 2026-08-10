@@ -61,6 +61,7 @@ stateDiagram-v2
 - 警長選舉開關。
 - 死亡資訊：隱藏、只顯示死者、顯示死因。
 - 平票：無人出局、全場重投、平票玩家 PK 正式發言後重投。
+- 角色配置可勾選「自動配置角色」；啟用後伺服器會依正式玩家數重算基本板子，玩家加入／離開與開局前都會重新對齊。取消勾選後才可手動調整完整 114 角色。
 
 警長首輪平票會進第二輪；第二輪仍平票則本局無警長。現任警長死亡後，依得票候補順位由仍存活者繼任。
 
@@ -69,6 +70,8 @@ stateDiagram-v2
 ## 3. 角色系統
 
 角色系統由 `src/roles.ts` 的資料驅動 Registry 管理，目前共有 **114 個 canonical 角色**。角色可重複配置，不再限制「特殊角色只能一名」。完整角色表見 `docs/ROLE_CATALOG.md`。
+
+依目前採用的酷米主表分類，邱比特、抖M教徒、抖S教主的 **base faction 仍是好人陣營**；「戀人」是配對後的關係狀態，不等於把這三個角色本身固定改成第三方。
 
 角色來源分三類：
 
@@ -124,7 +127,8 @@ stateDiagram-v2
 - 若觀看者語言不同，前端透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求翻譯；翻譯失敗時顯示原文，不阻塞遊戲流程。
 - 動態角色名稱／技能說明、系統訊息、錯誤與階段文字也會依觀看者語言翻譯。
 - 翻譯端點要求有效房間 session，並限制單次筆數與總文字長度，避免成為公開無限制推論代理。
-- 翻譯使用 Cloudflare Workers AI binding，不需要玩家提供翻譯 API Key；這與可選的 BYOK 遊戲 AI 是兩個不同功能。
+- 翻譯改用 **Google Cloud Translation Basic v2**，不再用生成式 AI/Workers AI。部署者以 Worker Secret `GOOGLE_TRANSLATE_API_KEYS` 提供 1~8 組 Google Translation API Key；可用換行、逗號或分號分隔。
+- Google 翻譯遇到無效 Key、配額／限流或暫時性服務錯誤時會依序嘗試下一組 Key；翻譯失敗仍顯示原文，不阻塞遊戲。
 
 ---
 
@@ -135,10 +139,13 @@ stateDiagram-v2
 若房主加入 AI：
 
 1. 選 Provider / Model。
-2. API Key 只放在房主目前瀏覽器 `sessionStorage`。
-3. AI 輪到操作時，房主瀏覽器把 Key 隨該次 `/ai/run` request 傳給 Worker。
-4. Durable Object 不把 Key 寫進 room state / SQLite / repository / Worker Secrets。
-5. 分頁工作階段結束後必須重新輸入。
+2. 每個 AI 可輸入 **1~8 組 API Key**；Key pool 只放在房主目前瀏覽器 `sessionStorage`。
+3. AI 輪到操作時，房主瀏覽器把該 AI 的 Key pool 隨該次 `/ai/run` request 傳給 Worker。
+4. Provider 回傳無效憑證、配額／限流或暫時性錯誤時，Worker 才依序切換下一組 Key；遊戲規則錯誤與合法性錯誤不會靠換 Key 重試。
+5. Durable Object 不把 Key 寫進 room state / SQLite / repository / Worker Secrets。
+6. 分頁工作階段結束後必須重新輸入。
+
+AI 正式發言同時可回傳可選的 **結構化白天技能 action**。例如白狼王真的要自爆時必須回傳符合當前角色技能的 `effect/targetIds/option`；伺服器會再以 `roleActionPrompt`、合法目標與 target count 驗證。單純在發言文字提到「自爆／決鬥」不會觸發技能，避免誤判。
 
 支援 OpenAI、Gemini、DeepSeek 與 HTTPS OpenAI-compatible endpoint。
 
@@ -209,10 +216,16 @@ npx wrangler deploy
 
 也可使用 Cloudflare Workers Builds 連接 GitHub，Production branch 指向 `main`。
 
-本 repository 不需要部署者提供共享遊戲 AI API Key。三語即時翻譯使用 `wrangler.jsonc` 中的 Cloudflare Workers AI binding (`AI`)，不需要額外 API Key，但會使用部署帳號的 Workers AI 額度／計費。
+本 repository 不需要部署者提供共享**遊戲 AI** API Key；遊戲 AI 仍由房主 BYOK。三語即時翻譯則使用 Google Cloud Translation Basic v2，需要部署者設定 Worker Secret：
+
+```bash
+npx wrangler secret put GOOGLE_TRANSLATE_API_KEYS
+```
+
+Secret 可填 1~8 組 Google Translation API Key，使用換行、逗號或分號分隔。不要把真實 Key 寫入 `wrangler.jsonc`、`.dev.vars.example`、Git 或 room state。
 
 ---
 
 ## 10. 安全
 
-請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、BYOK Key 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；聊天／正式發言在跨語言顯示時會送到 Cloudflare Workers AI 做翻譯。
+請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；需要跨語言顯示的文字會送到 Google Cloud Translation Basic v2，Google Translation Key 只由 Worker Secret 提供。

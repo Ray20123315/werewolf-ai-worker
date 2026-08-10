@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { callAI, parseJSONObject } from "./ai";
+import { callAIWithKeys, parseJSONObject } from "./ai";
 import { createPasswordVerifier, normalizePlayerName, verifyPassword } from "./auth";
 import {
   activePlayers,
@@ -55,7 +55,7 @@ type InitResult = { roomId: string; playerId: string; token: string };
 type JoinResult = { playerId: string; token: string; spectator: boolean };
 type AIJSON = { message?: unknown; targetId?: unknown; targetIds?: unknown; action?: unknown; option?: unknown };
 
-const DEFAULT_SETTINGS: GameSettings = { sheriffEnabled: false, deathInfo: "names", tieRule: "no_elimination" };
+const DEFAULT_SETTINGS: GameSettings = { sheriffEnabled: false, deathInfo: "names", tieRule: "no_elimination", autoRoleSetup: false };
 
 export class GameRoom extends DurableObject<Env> {
   private stateCache: GameState | undefined;
@@ -124,7 +124,9 @@ export class GameRoom extends DurableObject<Env> {
     const spectator = state.phase !== "lobby";
     const player = await this.newHumanPlayer(normalized.display, password, spectator);
     state.players.push(player);
-    if (!spectator) state.roleSetup = growRoleSetup(state.roleSetup);
+    if (!spectator) state.roleSetup = state.settings.autoRoleSetup
+      ? defaultRoleSetup(activePlayers(state.players).filter((p) => !p.kickedAt).length)
+      : growRoleSetup(state.roleSetup);
     this.addSystemMessage(state, spectator ? `${player.name} 以觀戰者身份重新加入；下一局可成為正式玩家。` : `${player.name} 加入房間。`);
     this.touchAndSave(state);
     this.broadcast(state);
@@ -157,14 +159,16 @@ export class GameRoom extends DurableObject<Env> {
     this.validateAIConfig(ai);
     const player = this.newAIPlayer(normalized.display, ai);
     state.players.push(player);
-    state.roleSetup = growRoleSetup(state.roleSetup);
+    state.roleSetup = state.settings.autoRoleSetup
+      ? defaultRoleSetup(activePlayers(state.players).filter((p) => !p.kickedAt).length)
+      : growRoleSetup(state.roleSetup);
     this.addSystemMessage(state, `AI 玩家 ${player.name} 加入房間（${ai.provider} / ${ai.model}）。API Key 不會寫入房間狀態。`);
     this.touchAndSave(state);
     this.broadcast(state);
     return { playerId: player.id };
   }
 
-  async runAI(hostToken: string, playerId: string, apiKey: string): Promise<{ ok: true }> {
+  async runAI(hostToken: string, playerId: string, apiKeys: string[]): Promise<{ ok: true }> {
     const before = this.requireState();
     this.assertHost(before, hostToken);
     const task = this.pendingAITask(before);
@@ -173,18 +177,22 @@ export class GameRoom extends DurableObject<Env> {
     if (!actor?.role || !actor.ai) throw new Error("AI 玩家狀態無效");
 
     if (task.operation === "debate_speech") {
-      const message = await this.decideAIDebateMessage(before, actor, apiKey);
+      const decision = await this.decideAIDebateTurn(before, actor, apiKeys);
       const state = this.requireState();
       this.assertFreshAITask(state, hostToken, playerId, "debate_speech");
       const current = state.players.find((p) => p.id === playerId)!;
-      this.recordDebateSpeech(state, current, message);
-      if (isDebateComplete(state.debateOrder, state.debateIndex)) this.enterVote(state);
-      else this.saveBroadcast(state);
+      const dayAction = this.normalizeAIDayAction(state, current, decision.action);
+      this.recordDebateSpeech(state, current, decision.message);
+      if (dayAction) this.submitRoleActionInternal(state, current, dayAction.effect, dayAction.targetIds, dayAction.option);
+      if (state.phase === "debate") {
+        if (isDebateComplete(state.debateOrder, state.debateIndex)) this.enterVote(state);
+        else this.saveBroadcast(state);
+      }
       return { ok: true };
     }
 
     if (task.operation === "vote") {
-      const targetId = await this.decideAIVote(before, actor, apiKey);
+      const targetId = await this.decideAIVote(before, actor, apiKeys);
       const state = this.requireState();
       this.assertFreshAITask(state, hostToken, playerId, "vote");
       this.castVoteById(state, playerId, targetId);
@@ -195,7 +203,7 @@ export class GameRoom extends DurableObject<Env> {
     this.assertFreshAITask(state, hostToken, playerId, task.operation);
     const current = state.players.find((p) => p.id === playerId)!;
     if (this.participatesWolfVote(state, current) && !state.nightActions.wolfVotes[current.id]) {
-      const targetId = await this.decideAITarget(before, actor, apiKey, this.legalWolfTargets(before, actor));
+      const targetId = await this.decideAITarget(before, actor, apiKeys, this.legalWolfTargets(before, actor));
       this.applyNightAction(state, current, { kind: "werewolf", targetId });
     } else {
       const prompt = roleActionPrompt(current, state);
@@ -203,7 +211,7 @@ export class GameRoom extends DurableObject<Env> {
       const targets = this.legalTargets(state, current, prompt.targetMode);
       const targetIds: string[] = [];
       if (targets.length) {
-        const first = await this.decideAITarget(before, actor, apiKey, targets);
+        const first = await this.decideAITarget(before, actor, apiKeys, targets);
         targetIds.push(first);
         if (String(prompt.targetMode).startsWith("two_")) {
           const second = targets.find((p) => p.id !== first);
@@ -283,6 +291,7 @@ export class GameRoom extends DurableObject<Env> {
     this.assertHost(state, token);
     this.assertLobby(state);
     const participants = activePlayers(state.players).filter((p) => !p.kickedAt);
+    if (state.settings.autoRoleSetup) state.roleSetup = defaultRoleSetup(participants.length);
     const error = validateRoleSetup(state.roleSetup, participants.length);
     if (error) throw new Error(error);
     state.players = assignRoles(state.players, state.roleSetup);
@@ -350,6 +359,7 @@ export class GameRoom extends DurableObject<Env> {
     const state = this.requireState();
     this.assertHost(state, token);
     this.assertLobby(state);
+    if (state.settings.autoRoleSetup) throw new Error("自動配置角色已啟用；請先取消勾選再手動調整角色");
     const roles = this.normalizeRoleSetup(raw);
     const error = validateRoleSetup(roles, activePlayers(state.players).filter((p) => !p.kickedAt).length);
     if (error && !error.startsWith("角色總數")) throw new Error(error);
@@ -364,6 +374,10 @@ export class GameRoom extends DurableObject<Env> {
     if (typeof raw.sheriffEnabled === "boolean") state.settings.sheriffEnabled = raw.sheriffEnabled;
     if (raw.deathInfo && ["hidden", "names", "full"].includes(raw.deathInfo)) state.settings.deathInfo = raw.deathInfo;
     if (raw.tieRule && ["no_elimination", "revote", "pk_revote"].includes(raw.tieRule)) state.settings.tieRule = raw.tieRule;
+    if (typeof raw.autoRoleSetup === "boolean") {
+      state.settings.autoRoleSetup = raw.autoRoleSetup;
+      if (raw.autoRoleSetup) state.roleSetup = defaultRoleSetup(activePlayers(state.players).filter((p) => !p.kickedAt).length);
+    }
     this.saveBroadcast(state);
   }
 
@@ -381,7 +395,9 @@ export class GameRoom extends DurableObject<Env> {
     target.name = `${oldName}（已踢出）`;
     if (state.phase === "lobby") {
       state.players = state.players.filter((p) => p.id !== target.id);
-      state.roleSetup = this.resizeRoleSetupAfterLeave(state.roleSetup);
+      state.roleSetup = state.settings.autoRoleSetup
+        ? defaultRoleSetup(activePlayers(state.players).filter((p) => !p.kickedAt).length)
+        : this.resizeRoleSetupAfterLeave(state.roleSetup);
     } else {
       target.alive = false;
       target.isSpectator = true;
@@ -1248,24 +1264,68 @@ export class GameRoom extends DurableObject<Env> {
     if (!task || task.playerId !== playerId || task.operation !== operation) throw new Error("AI 操作已過期，請重新同步房間狀態");
   }
 
-  private async decideAIDebateMessage(state: GameState, actor: Player, apiKey: string): Promise<string> {
+  private async decideAIDebateTurn(state: GameState, actor: Player, apiKeys: string[]): Promise<{ message: string; action?: unknown }> {
     if (!actor.ai) throw new Error("AI 設定不存在");
-    const result = await callAI(apiKey, {
+    const dayPrompt = roleActionPrompt(actor, state);
+    const usableDayPrompt = dayPrompt?.timing === "day" ? dayPrompt : undefined;
+    const legalTargets = usableDayPrompt ? this.legalTargets(state, actor, usableDayPrompt.targetMode) : [];
+    const actionInstruction = usableDayPrompt
+      ? [
+          `你目前有一個可選白天技能：effect=${usableDayPrompt.effect}，targetMode=${usableDayPrompt.targetMode}。`,
+          `合法目標：${legalTargets.length ? legalTargets.map((p) => `${p.id}=${p.name}`).join(", ") : "無需目標或目前無合法目標"}。`,
+          usableDayPrompt.options?.length ? `合法 option：${usableDayPrompt.options.join(", ")}。` : "此技能沒有 option。",
+          "只有你真的決定現在發動技能時，action 才填物件；否則 action 必須是 null。",
+          `action 物件格式：{"effect":"${usableDayPrompt.effect}","targetIds":${usableDayPrompt.targetMode === "none" ? "[]" : usableDayPrompt.targetMode.startsWith("two_") ? '["玩家ID1","玩家ID2"]' : '["玩家ID"]'}${usableDayPrompt.options?.length ? ',"option":"合法選項"' : ""}}。`,
+          "如果發言文字提到『自爆／決鬥／技能』但你並沒有要實際發動，action 必須維持 null；伺服器只相信結構化 action，不從文字關鍵字觸發技能。"
+        ].join("\n")
+      : "你目前沒有可在正式發言階段發動的角色技能，因此 action 必須是 null。";
+    const result = await callAIWithKeys(apiKeys, {
       config: actor.ai,
       system: this.aiSystemPrompt(actor, state),
-      prompt: `${this.privateContext(state, actor)}\n\n現在輪到你正式發言。只回傳 JSON：{"message":"80~180 字繁體中文發言"}。必須提出理由與目前懷疑方向。`
+      prompt: `${this.privateContext(state, actor)}\n\n現在輪到你正式發言。只回傳 JSON：{"message":"80~180 字繁體中文發言","action":null}。必須提出理由與目前懷疑方向。\n${actionInstruction}`
     });
     const parsed = parseJSONObject(result.text) as AIJSON;
-    return typeof parsed.message === "string" && parsed.message.trim() ? this.normalizeSpeech(parsed.message) : "目前資訊仍不足，我會先對照前後發言與夜間結果，再從矛盾最大的玩家開始懷疑。";
+    const message = typeof parsed.message === "string" && parsed.message.trim()
+      ? this.normalizeSpeech(parsed.message)
+      : "目前資訊仍不足，我會先對照前後發言與夜間結果，再從矛盾最大的玩家開始懷疑。";
+    return { message, ...(parsed.action !== undefined ? { action: parsed.action } : {}) };
   }
 
-  private async decideAIVote(state: GameState, actor: Player, apiKey: string): Promise<string> {
-    return this.decideAITarget(state, actor, apiKey, livingPlayers(state.players).filter((p) => p.id !== actor.id));
+  private normalizeAIDayAction(
+    state: GameState,
+    actor: Player,
+    raw: unknown
+  ): { effect: RoleActionEffect; targetIds: string[]; option?: string } | undefined {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+    const prompt = roleActionPrompt(actor, state);
+    if (!prompt || prompt.timing !== "day") return undefined;
+    const record = raw as Record<string, unknown>;
+    if (record.effect !== prompt.effect) return undefined;
+    const rawIds = Array.isArray(record.targetIds)
+      ? record.targetIds
+      : typeof record.targetId === "string"
+        ? [record.targetId]
+        : [];
+    if (!rawIds.every((id) => typeof id === "string")) return undefined;
+    const targetIds = rawIds as string[];
+    try { this.validateTargetCount(prompt.targetMode, targetIds); } catch { return undefined; }
+    const legal = new Set(this.legalTargets(state, actor, prompt.targetMode).map((p) => p.id));
+    if (targetIds.some((id) => !legal.has(id))) return undefined;
+    let option: string | undefined;
+    if (prompt.options?.length) {
+      if (typeof record.option !== "string" || !prompt.options.includes(record.option)) return undefined;
+      option = record.option;
+    }
+    return { effect: prompt.effect, targetIds, ...(option ? { option } : {}) };
   }
 
-  private async decideAITarget(state: GameState, actor: Player, apiKey: string, candidates: Player[]): Promise<string> {
+  private async decideAIVote(state: GameState, actor: Player, apiKeys: string[]): Promise<string> {
+    return this.decideAITarget(state, actor, apiKeys, livingPlayers(state.players).filter((p) => p.id !== actor.id));
+  }
+
+  private async decideAITarget(state: GameState, actor: Player, apiKeys: string[], candidates: Player[]): Promise<string> {
     if (!actor.ai || candidates.length === 0) throw new Error("AI 沒有合法目標");
-    const result = await callAI(apiKey, {
+    const result = await callAIWithKeys(apiKeys, {
       config: actor.ai,
       system: this.aiSystemPrompt(actor, state),
       prompt: `${this.privateContext(state, actor)}\n\n合法目標：${candidates.map((p) => `${p.id}=${p.name}`).join(", ")}。只回傳 JSON：{"targetId":"玩家ID"}。`
@@ -1521,6 +1581,7 @@ export class GameRoom extends DurableObject<Env> {
 
   private migrateState(state: GameState): void {
     state.settings ??= { ...DEFAULT_SETTINGS };
+    state.settings.autoRoleSetup ??= false;
     state.sheriff ??= { enabled: false, electionRound: 0, candidates: [], votes: {}, successors: [] };
     state.roleMemory ??= {};
     state.roleResults ??= {};

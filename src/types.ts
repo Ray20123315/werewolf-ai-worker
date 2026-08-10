@@ -279,6 +279,7 @@ export interface GameSettings {
   sheriffEnabled: boolean;
   deathInfo: DeathInfoMode;
   tieRule: TieRule;
+  autoRoleSetup: boolean;
 }
 
 export interface SheriffState {

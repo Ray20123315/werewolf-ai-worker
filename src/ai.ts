@@ -12,6 +12,44 @@ export interface AIResult {
   model: string;
 }
 
+export const MAX_AI_KEYS = 8;
+
+class AIProviderError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail: string
+  ) {
+    super(message);
+    this.name = "AIProviderError";
+  }
+}
+
+export function normalizeCredentialPool(values: readonly string[]): string[] {
+  const unique: string[] = [];
+  for (const raw of values) {
+    const key = requireCredential(raw);
+    if (!unique.includes(key)) unique.push(key);
+    if (unique.length >= MAX_AI_KEYS) break;
+  }
+  if (unique.length === 0) throw new Error("請輸入至少 1 組有效的 API Key");
+  return unique;
+}
+
+export async function callAIWithKeys(apiKeys: readonly string[], request: AIRequest): Promise<AIResult> {
+  const keys = normalizeCredentialPool(apiKeys);
+  let lastError: unknown;
+  for (let index = 0; index < keys.length; index += 1) {
+    try {
+      return await callAI(keys[index]!, request);
+    } catch (error) {
+      lastError = error;
+      if (index >= keys.length - 1 || !isRetryableKeyFailure(error)) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("AI provider 呼叫失敗");
+}
+
 export async function callAI(apiKey: string, request: AIRequest): Promise<AIResult> {
   const key = requireCredential(apiKey);
   const { provider, model } = request.config;
@@ -27,6 +65,14 @@ export async function callAI(apiKey: string, request: AIRequest): Promise<AIResu
     default:
       return assertNever(provider);
   }
+}
+
+function isRetryableKeyFailure(error: unknown): boolean {
+  if (!(error instanceof AIProviderError)) return false;
+  if (error.status === 401 || error.status === 403 || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500) return true;
+  if (error.status !== 400) return false;
+  const detail = error.detail.toLowerCase();
+  return ["api key", "api_key", "keyinvalid", "invalid key", "quota", "rate limit", "resource exhausted"].some((needle) => detail.includes(needle));
 }
 
 async function callOpenAI(apiKey: string, model: string, system: string, prompt: string): Promise<AIResult> {
@@ -110,7 +156,7 @@ async function fetchJson(url: string, options: { headers?: Record<string, string
   const payload = await response.json().catch(() => undefined) as unknown;
   if (!response.ok) {
     const detail = safeErrorDetail(payload);
-    throw new Error(`AI provider HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+    throw new AIProviderError(`AI provider HTTP ${response.status}${detail ? `: ${detail}` : ""}`, response.status, detail);
   }
   return payload;
 }
