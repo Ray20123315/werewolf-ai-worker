@@ -8,6 +8,7 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
+    "rootDir": "src",
     "outDir": ".test-build"
   },
   "include": ["src/types.ts", "src/game-engine.ts"]
