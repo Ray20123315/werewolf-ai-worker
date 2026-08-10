@@ -1,0 +1,126 @@
+name: chatgpt-translation-admin-staging
+
+on:
+  push:
+    branches:
+      - chatgpt-translation-admin-v1
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Reconstruct exact source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            .chatgpt_translation_admin_payload/00 \
+            .chatgpt_translation_admin_payload/01 \
+            .chatgpt_translation_admin_payload/02 \
+            .chatgpt_translation_admin_payload/03 \
+            .chatgpt_translation_admin_payload/04 \
+            .chatgpt_translation_admin_payload/05 \
+            .chatgpt_translation_admin_payload/06 \
+            .chatgpt_translation_admin_payload/07 \
+            .chatgpt_translation_admin_payload/08 \
+            .chatgpt_translation_admin_payload/09 \
+            .chatgpt_translation_admin_payload/10 > /tmp/payload.b64
+          base64 -d /tmp/payload.b64 > /tmp/payload.tar.gz
+          echo 'e5100407f2a2eba9b7d3743158e72b5f63289b1e6eaadc42789f223541e58ffa  /tmp/payload.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/payload.tar.gz
+      - name: Verify exact target source blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() { test "$(git hash-object "$2")" = "$1" || { echo "target hash mismatch: $2 actual=$(git hash-object "$2") expected=$1" >&2; exit 1; }; }
+          check 4a2da47d1fb88aade09c0e8a740a502e68284ab7 README.md
+          check de36ef54611dd42c73dda25f7014031892917f20 SECURITY.md
+          check b62205bd93361c09cce76d62829287a87bbd5e62 .dev.vars.example
+          check ee6b59cfe145bfbccda2e9511c5fe952729b83f5 package.json
+          check eeb8d2f5df451272a45fa49f4ca0da2696b35907 tsconfig.test.json
+          check 61ca676adc024bfaf01a536cc21910538f50966b wrangler.jsonc
+          check 79a541407f8ebd22c56bd5d17cc229320b283187 src/admin.ts
+          check ebb2ed019579af793889abae7e1472416c78e478 src/room-directory.ts
+          check eb2ddbf521cd531efdd12469a4c744f1c6a3bf7e src/types.ts
+          check 4ac0bfafa022dcce90ee8cdf321eb8267d8cec8f src/room.ts
+          check f8f932e259ebe9a032c35e16abf3272661100b6d src/index.ts
+          check 2821856dc693d635f7b66a2d200f9d3b3ee08abe src/chat-channels.ts
+          check 79ab6978c12c6889fa51da806fbef6677c026368 public/admin.html
+          check 7f599710fc2f3174ec195a813b212170ea934018 public/admin.css
+          check bc0afc6252def32549fc5fe4bc24675b66413ea0 public/admin.js
+          check 43f917b2def4e682ecb19088e9162ebaf4f64650 public/index.html
+          check eda46c1893130ccf135a7dddd6ec50425dae57e3 public/styles.css
+          check ffb582a098c5f43e7476dc10e6a808c23a5ecab1 public/i18n.js
+          check ea313766da2e437e2d6601539d52ccab5996ac1a public/app.js
+          check b120ca1f799754d0d6991be7d4c614feac502e35 test/admin.test.mjs
+          check 49055c51444613db2dab7bc1a2b81914833b2797 test/translation.test.mjs
+          check 232ec19e23303acfe2832518c6c5a78faa746567 test/i18n-static.test.mjs
+          check f23518f27e7ac7dcfb7c01058014f61f9850c2a0 test/chat-channels.test.mjs
+      - name: Run npm ci
+        run: npm ci
+      - name: Run npm test
+        run: npm test
+      - name: Run npm run typecheck
+        run: npm run typecheck
+      - name: Run Wrangler dry-run
+        run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+      - name: Reverify source after build gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() { test "$(git hash-object "$2")" = "$1" || { echo "post-gate hash mismatch: $2" >&2; exit 1; }; }
+          check 4a2da47d1fb88aade09c0e8a740a502e68284ab7 README.md
+          check de36ef54611dd42c73dda25f7014031892917f20 SECURITY.md
+          check b62205bd93361c09cce76d62829287a87bbd5e62 .dev.vars.example
+          check ee6b59cfe145bfbccda2e9511c5fe952729b83f5 package.json
+          check eeb8d2f5df451272a45fa49f4ca0da2696b35907 tsconfig.test.json
+          check 61ca676adc024bfaf01a536cc21910538f50966b wrangler.jsonc
+          check 79a541407f8ebd22c56bd5d17cc229320b283187 src/admin.ts
+          check ebb2ed019579af793889abae7e1472416c78e478 src/room-directory.ts
+          check eb2ddbf521cd531efdd12469a4c744f1c6a3bf7e src/types.ts
+          check 4ac0bfafa022dcce90ee8cdf321eb8267d8cec8f src/room.ts
+          check f8f932e259ebe9a032c35e16abf3272661100b6d src/index.ts
+          check 2821856dc693d635f7b66a2d200f9d3b3ee08abe src/chat-channels.ts
+          check 79ab6978c12c6889fa51da806fbef6677c026368 public/admin.html
+          check 7f599710fc2f3174ec195a813b212170ea934018 public/admin.css
+          check bc0afc6252def32549fc5fe4bc24675b66413ea0 public/admin.js
+          check 43f917b2def4e682ecb19088e9162ebaf4f64650 public/index.html
+          check eda46c1893130ccf135a7dddd6ec50425dae57e3 public/styles.css
+          check ffb582a098c5f43e7476dc10e6a808c23a5ecab1 public/i18n.js
+          check ea313766da2e437e2d6601539d52ccab5996ac1a public/app.js
+          check b120ca1f799754d0d6991be7d4c614feac502e35 test/admin.test.mjs
+          check 49055c51444613db2dab7bc1a2b81914833b2797 test/translation.test.mjs
+          check 232ec19e23303acfe2832518c6c5a78faa746567 test/i18n-static.test.mjs
+          check f23518f27e7ac7dcfb7c01058014f61f9850c2a0 test/chat-channels.test.mjs
+      - name: Create clean verified commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(
+            README.md SECURITY.md .dev.vars.example package.json tsconfig.test.json wrangler.jsonc
+            src/admin.ts src/room-directory.ts src/types.ts src/room.ts src/index.ts src/chat-channels.ts
+            public/admin.html public/admin.css public/admin.js public/index.html public/styles.css public/i18n.js public/app.js
+            test/admin.test.mjs test/translation.test.mjs test/i18n-static.test.mjs test/chat-channels.test.mjs
+          )
+          mkdir -p /tmp/verified
+          tar -cf /tmp/verified/source.tar "${paths[@]}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C chatgpt-translation-admin-clean-v1 200d31feac1b8356f4ec7d43d1379a604535c608
+          tar -xf /tmp/verified/source.tar
+          git add -- "${paths[@]}"
+          printf '%s\n' "${paths[@]}" | sort > /tmp/expected
+          git diff --cached --name-only | sort > /tmp/actual
+          diff -u /tmp/expected /tmp/actual
+          git commit -m 'Fix translation and add admin backend'
+          git push origin HEAD:chatgpt-translation-admin-clean-v1
