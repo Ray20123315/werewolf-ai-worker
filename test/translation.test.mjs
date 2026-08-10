@@ -48,6 +48,16 @@ test("Google Cloud Translation v2 preserves ordering and explicit Traditional/Si
   assert.deepEqual(capturedBody, { q: ["狼人殺", "哈囉 & 再見"], target: "zh-CN", source: "zh-TW", format: "text" });
 });
 
+test("Google translation auto-detection omits the source field for human-authored text", async () => {
+  let capturedBody;
+  const fetcher = async (_input, init) => {
+    capturedBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({ data: { translations: [{ translatedText: "Hello" }] } }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  assert.deepEqual(await translateTexts(fetcher, ["google-key"], ["你好"], "en"), ["Hello"]);
+  assert.deepEqual(capturedBody, { q: ["你好"], target: "en", format: "text" });
+});
+
 test("Google translation retries the next key only for credential quota or transient failures", async () => {
   const attempted = [];
   const fetcher = async (input) => {

@@ -11,5 +11,5 @@
     "rootDir": "src",
     "outDir": ".test-build"
   },
-  "include": ["src/types.ts", "src/roles.ts", "src/auth.ts", "src/ai.ts", "src/translate.ts", "src/game-engine.ts", "src/chat-channels.ts"]
+  "include": ["src/types.ts", "src/roles.ts", "src/auth.ts", "src/ai.ts", "src/admin.ts", "src/translate.ts", "src/game-engine.ts", "src/chat-channels.ts"]
 }

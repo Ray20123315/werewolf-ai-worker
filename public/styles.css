@@ -204,3 +204,8 @@ input:focus, select:focus, textarea:focus { border-color: #b96c64; box-shadow: 0
   .confirm-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .confirm-dialog-actions .button { width: 100%; min-width: 0; }
 }
+
+.player-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.translation-status { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }
+.translation-status.is-error { color: #9a3412; }
+.admin-link { text-decoration: none; }

@@ -123,12 +123,20 @@ stateDiagram-v2
 ### 三語與即時翻譯
 
 - UI 支援 `zh-TW`（繁體中文）、`zh-CN`（简体中文）、`en`（English），選擇會保存在瀏覽器。
-- 玩家送出的聊天與正式發言保留原文，並附上發送端語系 metadata；翻譯只影響每位觀看者的顯示。
-- 若觀看者語言不同，前端透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求翻譯；翻譯失敗時顯示原文，不阻塞遊戲流程。
+- 玩家送出的聊天與正式發言保留原文；人類發言不再把「介面語言」誤當成文字來源語言，而由 Google Translation 自動偵測來源語言。AI 正式發言若系統已知來源語言才會附明確 source locale。翻譯只影響每位觀看者的顯示。
+- 若觀看者語言不同，前端透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求翻譯；翻譯失敗時顯示原文與可見的失敗狀態、不把原文永久 cache 成成功翻譯，稍後可重試，且不阻塞遊戲流程。
 - 動態角色名稱／技能說明、系統訊息、錯誤與階段文字也會依觀看者語言翻譯。
 - 翻譯端點要求有效房間 session，並限制單次筆數與總文字長度，避免成為公開無限制推論代理。
 - 翻譯改用 **Google Cloud Translation Basic v2**，不再用生成式 AI/Workers AI。部署者以 Worker Secret `GOOGLE_TRANSLATE_API_KEYS` 提供 1~8 組 Google Translation API Key；可用換行、逗號或分號分隔。
-- Google 翻譯遇到無效 Key、配額／限流或暫時性服務錯誤時會依序嘗試下一組 Key；翻譯失敗仍顯示原文，不阻塞遊戲。
+- Google 翻譯遇到無效 Key、配額／限流或暫時性服務錯誤時會依序嘗試下一組 Key；翻譯錯誤會以去敏診斷寫入管理後台，且仍顯示原文、不阻塞遊戲。
+
+### 管理後台與房內管理員
+
+- `/admin` 是全站管理後台；API 使用 Worker Secret `ADMIN_PANEL_TOKENS` 的 Bearer Token 驗證，Token 只保存在管理者瀏覽器的 `sessionStorage`。
+- 後台可看已追蹤房間總數、房號、階段、玩家數、房主／房內管理員、Google 翻譯是否已配置，以及最近的 API／翻譯／AI／WebSocket 去敏錯誤。
+- 後台可以進入單一房間檢視、發系統公告、踢出玩家、指定或移除房內管理員；不會顯示人物密碼 verifier、session token、Google Translation Key 或玩家 BYOK AI Key。
+- 房主可以指定「房內管理員」。房內管理員目前只取得秩序管理權（例如踢出一般玩家），不能取代房主開始／重開遊戲，也不能修改角色配置與房規；房內管理員不能踢房主或其他房內管理員。
+- 全房間清單由獨立 `RoomDirectory` Durable Object 登記。部署此版本後新建或再次被存取的房間會自動出現在後台；部署前已存在但之後完全沒有流量的休眠房間無法從 Durable Object namespace 反向列舉，可在後台輸入已知房號補登記。
 
 ---
 
@@ -224,8 +232,16 @@ npx wrangler secret put GOOGLE_TRANSLATE_API_KEYS
 
 Secret 可填 1~8 組 Google Translation API Key，使用換行、逗號或分號分隔。不要把真實 Key 寫入 `wrangler.jsonc`、`.dev.vars.example`、Git 或 room state。
 
+全站管理後台另外需要至少一組長度 24 字元以上的隨機管理 Token：
+
+```bash
+npx wrangler secret put ADMIN_PANEL_TOKENS
+```
+
+可放最多 8 組，以換行、逗號或分號分隔。管理 Token 不應與人物密碼、房間密碼、Google Key 或遊戲 AI Key 共用。部署完成後由 `/admin` 輸入 Token。
+
 ---
 
 ## 10. 安全
 
-請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；需要跨語言顯示的文字會送到 Google Cloud Translation Basic v2，Google Translation Key 只由 Worker Secret 提供。
+請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；需要跨語言顯示的文字會送到 Google Cloud Translation Basic v2，Google Translation Key 只由 Worker Secret 提供。管理後台另以 `ADMIN_PANEL_TOKENS` Secret 驗證，診斷錯誤在寫入 `RoomDirectory` 前會先去除常見 credential/token 形式。

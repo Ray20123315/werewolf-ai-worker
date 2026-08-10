@@ -1,0 +1,36 @@
+.admin-shell { padding-bottom: 4rem; }
+.admin-login { max-width: 560px; margin: 7vh auto 0; }
+.admin-dashboard { display: grid; gap: 1rem; }
+.admin-toolbar { display: flex; justify-content: space-between; gap: 1rem; align-items: end; }
+.admin-toolbar h1 { margin: .2rem 0 0; }
+.admin-toolbar-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.admin-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.admin-stat { display: grid; gap: .35rem; }
+.admin-stat span { opacity: .68; font-size: .85rem; }
+.admin-stat strong { font-size: 1.7rem; }
+.admin-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, .8fr); gap: 1rem; align-items: start; }
+.admin-inline-form { display: flex; align-items: end; gap: .6rem; margin-bottom: .8rem; }
+.admin-inline-form label { flex: 1; }
+.admin-table-wrap { overflow: auto; }
+.admin-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.admin-table th, .admin-table td { text-align: left; padding: .65rem .55rem; border-bottom: 1px solid rgba(35, 29, 24, .12); vertical-align: top; }
+.admin-table th { font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; opacity: .65; }
+.admin-table td { font-size: .9rem; }
+.admin-room-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-bottom: .8rem; }
+.admin-room-meta div { padding: .65rem; border-radius: 12px; background: rgba(255,255,255,.45); }
+.admin-room-meta span { display: block; opacity: .6; font-size: .75rem; }
+.admin-player-list { display: grid; gap: .55rem; margin: .8rem 0; }
+.admin-player { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .65rem; border: 1px solid rgba(35, 29, 24, .12); border-radius: 12px; }
+.admin-player-copy { min-width: 0; }
+.admin-player-copy small { display: block; opacity: .65; margin-top: .2rem; }
+.admin-player-actions { display: flex; gap: .35rem; flex-wrap: wrap; justify-content: end; }
+.admin-notice-form { display: grid; gap: .5rem; margin-top: 1rem; }
+.admin-empty { opacity: .65; padding: 1rem 0; }
+.translation-status { margin: 0 0 .55rem; padding: .55rem .7rem; border-radius: 10px; background: rgba(170, 86, 56, .12); font-size: .85rem; }
+.translation-warning { margin-left: .5rem; font-size: .7rem; font-weight: 700; opacity: .7; }
+.player-actions { display: flex; gap: .35rem; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 900px) {
+  .admin-grid, .admin-stats { grid-template-columns: 1fr; }
+  .admin-toolbar { align-items: stretch; flex-direction: column; }
+  .admin-inline-form { align-items: stretch; flex-direction: column; }
+}
