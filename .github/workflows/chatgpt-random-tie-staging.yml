@@ -1,0 +1,110 @@
+name: chatgpt-random-tie-staging
+
+on:
+  push:
+    branches: [chatgpt-random-tie-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Verify baseline source blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() { test "$(git hash-object "$2")" = "$1" || { echo "baseline hash mismatch: $2" >&2; exit 1; }; }
+          check 4666551641c1441068d5db81b1c52fbb63cad2b2 src/types.ts
+          check 6a1c85f196c80afd5c7a468365d50b2af188aaab src/game-engine.ts
+          check f418f70c13336b64fe44b3d8174563982af66409 src/room.ts
+          check 6b888d172e90e7bad8228e0b6e15d2d35aa6cd0e public/index.html
+          check 267594966bb91fd1065367925a4c3821e51a4e45 public/i18n.js
+          check a000bde84dffeb51cc8ac2fa1b81aaa952ddfda6 test/game-engine.test.mjs
+          check 707bb6e6bb670ea0fd661098bcbd5f0f61a37509 test/i18n-static.test.mjs
+
+      - name: Apply exact random-tie patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          def rep(path, old, new, count=1):
+              p=Path(path); s=p.read_text(); n=s.count(old)
+              if n < count: raise SystemExit(f'{path}: expected at least {count} match, got {n}')
+              p.write_text(s.replace(old,new,count))
+
+          rep('src/types.ts','export type TieRule = "no_elimination" | "revote" | "pk_revote";','export type TieRule = "no_elimination" | "revote" | "pk_revote" | "random_elimination";')
+
+          old='''export function topWeightedVoteTargets(state: GameState): string[] {\n  const entries = Object.entries(weightedVoteCounts(state)).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));\n  if (entries.length === 0 || entries[0]![1] <= 0) return [];\n  const top = entries[0]![1];\n  return entries.filter(([, count]) => count === top).map(([id]) => id);\n}\n\n'''
+          new=old+'''export function randomTopVoteTarget(state: GameState): string | undefined {\n  const topTargets = topWeightedVoteTargets(state);\n  if (topTargets.length === 0) return undefined;\n  if (topTargets.length === 1) return topTargets[0];\n  return secureShuffle(topTargets)[0];\n}\n\n'''
+          rep('src/game-engine.ts',old,new)
+
+          rep('src/room.ts','''  roleSetupTotal,\n  secureShuffle,\n  teamForRole,\n  topWeightedVoteTargets,''','''  roleSetupTotal,\n  randomTopVoteTarget,\n  secureShuffle,\n  teamForRole,\n  topWeightedVoteTargets,''')
+          rep('src/room.ts','["no_elimination", "revote", "pk_revote"].includes(raw.tieRule)','["no_elimination", "revote", "pk_revote", "random_elimination"].includes(raw.tieRule)')
+          rep('src/room.ts','''    const topTargets = topWeightedVoteTargets(state);\n    const eliminatedId = topTargets.length === 1 ? topTargets[0] : undefined;\n    if (!eliminatedId && topTargets.length > 1) {''','''    const topTargets = topWeightedVoteTargets(state);\n    const randomTieElimination = topTargets.length > 1 && state.settings.tieRule === "random_elimination";\n    const eliminatedId = topTargets.length === 1 ? topTargets[0] : randomTieElimination ? randomTopVoteTarget(state) : undefined;\n    if (randomTieElimination && eliminatedId) {\n      this.addSystemMessage(state, `最高票平手：${topTargets.map((id) => this.nameOf(state, id)).join("、")}。依房規隨機抽中 ${this.nameOf(state, eliminatedId)} 出局。`);\n    }\n    if (!eliminatedId && topTargets.length > 1) {''')
+          rep('src/room.ts','      if (target?.role === "masochist_cultist") {','      if (topTargets.length === 1 && target?.role === "masochist_cultist") {')
+
+          rep('public/index.html','<label>平票處理<select name="tieRule"><option value="no_elimination">平票無人出局</option><option value="revote">全場重投</option><option value="pk_revote">平票玩家 PK 後重投</option></select></label>','<label>平票處理<select name="tieRule"><option value="no_elimination">平票無人出局</option><option value="revote">全場重投</option><option value="pk_revote">平票玩家 PK 後重投</option><option value="random_elimination">平票隨機淘汰 1 人</option></select></label>')
+          needle='  "平票玩家 PK 後重投": { "zh-TW": "平票玩家 PK 後重投", "zh-CN": "平票玩家 PK 后重投", en: "Tied players debate, then revote" },\n'
+          rep('public/i18n.js',needle,needle+'  "平票隨機淘汰 1 人": { "zh-TW": "平票隨機淘汰 1 人", "zh-CN": "平票随机淘汰 1 人", en: "Randomly eliminate 1 tied player" },\n')
+
+          rep('test/game-engine.test.mjs','''  pluralityTarget,\n  resolveNight,''','''  pluralityTarget,\n  randomTopVoteTarget,\n  resolveNight,''')
+          anchor='test("weighted voting supports zero-weight and PK top target detection", () => {'
+          test='''test("random tie elimination can only select a highest-vote tied candidate", () => {\n  const state = baseState([p("a", "villager"), p("b", "villager"), p("c", "werewolf"), p("d", "villager")], {\n    a: "b", b: "c", c: "b", d: "c"\n  });\n  assert.deepEqual(new Set(topWeightedVoteTargets(state)), new Set(["b", "c"]));\n  for (let i = 0; i < 64; i += 1) assert.ok(["b", "c"].includes(randomTopVoteTarget(state)));\n});\n\n'''
+          rep('test/game-engine.test.mjs',anchor,test+anchor)
+
+          rep('test/i18n-static.test.mjs','  assert.equal(knownText("最多 8 組，只存此瀏覽器 session", "en"), "Up to 8; stored only in this browser session");','  assert.equal(knownText("最多 8 組，只存此瀏覽器 session", "en"), "Up to 8; stored only in this browser session");\n  assert.equal(knownText("平票隨機淘汰 1 人", "zh-CN"), "平票随机淘汰 1 人");\n  assert.equal(knownText("平票隨機淘汰 1 人", "en"), "Randomly eliminate 1 tied player");')
+          rep('test/i18n-static.test.mjs','  assert.match(html, /textarea name="apiKeys"/);','  assert.match(html, /textarea name="apiKeys"/);\n  assert.match(html, /value="random_elimination"/);')
+          anchor='test("server translation endpoint uses authenticated Google Cloud Translation v2 without Workers AI binding", () => {'
+          test='''test("random tie rule is server-authoritative and reuses the normal exile pipeline", () => {\n  const types = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");\n  const room = readFileSync(new URL("../src/room.ts", import.meta.url), "utf8");\n  assert.match(types, /random_elimination/);\n  assert.match(room, /state\\.settings\\.tieRule === "random_elimination"/);\n  assert.match(room, /randomTopVoteTarget\\(state\\)/);\n  assert.match(room, /topTargets\\.length === 1 && target\\?\\.role === "masochist_cultist"/);\n});\n\n'''
+          rep('test/i18n-static.test.mjs',anchor,test+anchor)
+          PY
+
+      - name: Verify exact target blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() { test "$(git hash-object "$2")" = "$1" || { echo "target hash mismatch: $2 actual=$(git hash-object "$2") expected=$1" >&2; exit 1; }; }
+          check e8dcac6f2952f29db3971ed33b88cf33ed5f0ee0 src/types.ts
+          check 44923741ede7a7c2f8f0df276342fb43ea8f2926 src/game-engine.ts
+          check cb73ad53becece04514cc7ce42578e6a533db70b src/room.ts
+          check 76a439dac57c77c822e40801eca8c1e2e5cf305e public/index.html
+          check 1b11ab575c2537d655e281d3da7d3ff711eb41de public/i18n.js
+          check 5e2a120f3ba3c3e124d4cc03f369555276bebffc test/game-engine.test.mjs
+          check 9660816b5df9727783a5693cfbf64a4b63fe1734 test/i18n-static.test.mjs
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+
+      - name: Create clean verified commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/random-tie-verified/src /tmp/random-tie-verified/public /tmp/random-tie-verified/test
+          cp src/types.ts src/game-engine.ts src/room.ts /tmp/random-tie-verified/src/
+          cp public/index.html public/i18n.js /tmp/random-tie-verified/public/
+          cp test/game-engine.test.mjs test/i18n-static.test.mjs /tmp/random-tie-verified/test/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C chatgpt-random-tie-clean-v1 1e3940c3e61b3e8acb3526417c58c2a67d440006
+          cp /tmp/random-tie-verified/src/* src/
+          cp /tmp/random-tie-verified/public/* public/
+          cp /tmp/random-tie-verified/test/* test/
+          git add -- src/types.ts src/game-engine.ts src/room.ts public/index.html public/i18n.js test/game-engine.test.mjs test/i18n-static.test.mjs
+          git diff --cached --name-only | sort > /tmp/actual
+          printf '%s\n' public/i18n.js public/index.html src/game-engine.ts src/room.ts src/types.ts test/game-engine.test.mjs test/i18n-static.test.mjs | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          git commit -m 'Add random elimination tie rule'
+          git push origin HEAD:chatgpt-random-tie-clean-v1
