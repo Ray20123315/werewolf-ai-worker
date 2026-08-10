@@ -2,13 +2,13 @@ import { GameRoom } from "./room";
 import { installChatChannels } from "./chat-channels";
 import { ROLE_LIST } from "./roles";
 import type { AIConfig } from "./types";
-import { normalizeTranslationLocale, parseGoogleTranslateApiKeys, translateTexts, validateTranslationTexts } from "./translate";
+import { normalizeTranslationLocale, translateTexts, validateTranslationTexts } from "./translate";
 
 installChatChannels(GameRoom);
 export { GameRoom };
 
 type JsonObject = Record<string, unknown>;
-type WorkerEnv = Env & { GOOGLE_TRANSLATE_API_KEYS?: string };
+type WorkerEnv = Env;
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -17,7 +17,7 @@ export default {
 
     try {
       if (request.method === "GET" && url.pathname === "/api/health") {
-        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers", aiMode: "byok", translation: "google-cloud-v2", mode: "debate-only" });
+        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers", aiMode: "byok", translation: "google-gtx+mymemory-fallback", mode: "debate-only" });
       }
 
       if (request.method === "GET" && url.pathname === "/api/roles") {
@@ -55,8 +55,7 @@ export default {
         const sourceLocale = body.sourceLocale === undefined ? undefined : normalizeTranslationLocale(body.sourceLocale);
         if (body.sourceLocale !== undefined && !sourceLocale) throw new Error("sourceLocale 無效");
         const texts = validateTranslationTexts(body.texts);
-        const translationKeys = parseGoogleTranslateApiKeys(env.GOOGLE_TRANSLATE_API_KEYS);
-        return json({ translations: await translateTexts(fetch, translationKeys, texts, targetLocale, sourceLocale), targetLocale });
+        return json({ translations: await translateTexts(fetch, texts, targetLocale, sourceLocale), targetLocale });
       }
 
       const roomInfo = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/info$/);
@@ -101,7 +100,7 @@ export default {
       const status = message.includes("不存在") ? 404
         : message.includes("憑證") || message.includes("只有房主") ? 403
           : message.includes("密碼錯誤") || message.includes("名稱或人物密碼錯誤") ? 401
-            : message.startsWith("AI provider HTTP") || message.startsWith("Google Translation HTTP") ? 502
+            : message.startsWith("AI provider HTTP") || message.includes("翻譯服務暫時無法使用") ? 502
               : 400;
       return json({ error: message }, status);
     }
