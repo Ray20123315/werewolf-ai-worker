@@ -12,6 +12,11 @@ import type {
 } from "./types";
 
 type WinConditionMode = "slaughter_edge" | "slaughter_all";
+type PlayerListWithWinMeta = Player[] & {
+  __winConditionMode?: WinConditionMode;
+  __initialCivilianEdge?: boolean;
+  __initialGodEdge?: boolean;
+};
 const CIVILIAN_EDGE_ROLES = new Set<Role>(["villager", "confirmed_villager"]);
 const SHERIFF_SECOND_SUFFIX = "::sheriff2";
 
@@ -158,24 +163,29 @@ export function checkWinner(players: Player[]): Team | undefined {
   const spirits = alive.filter((p) => playerFaction(p) === "spirit").length;
   if (wolves === 0) return spirits > 0 ? "spirit" : "village";
 
-  const mode = ((players as Player[] & { __winConditionMode?: WinConditionMode }).__winConditionMode ?? "slaughter_edge") as WinConditionMode;
+  const meta = players as PlayerListWithWinMeta;
+  const mode = meta.__winConditionMode ?? "slaughter_edge";
   if (mode === "slaughter_all") {
     const opponents = alive.filter((p) => playerFaction(p) !== "werewolf");
     return opponents.length === 0 ? "werewolf" : undefined;
   }
 
-  const initialVillage = activePlayers(players).filter((p) => p.role && roleDefinition(p.role).faction === "village");
-  const initialCivilians = initialVillage.filter(isVillageCivilian);
-  const initialGods = initialVillage.filter((p) => !isVillageCivilian(p));
-  if (initialCivilians.length === 0 && initialGods.length === 0) {
+  // Prefer immutable opening-edge metadata captured immediately after role assignment.
+  // Falling back to current roles preserves compatibility with older saved rooms/tests.
+  const currentVillage = activePlayers(players).filter((p) => p.role && roleDefinition(p.role).faction === "village");
+  const currentCivilians = currentVillage.filter(isVillageCivilian);
+  const currentGods = currentVillage.filter((p) => !isVillageCivilian(p));
+  const civilianEdgeExisted = typeof meta.__initialCivilianEdge === "boolean" ? meta.__initialCivilianEdge : currentCivilians.length > 0;
+  const godEdgeExisted = typeof meta.__initialGodEdge === "boolean" ? meta.__initialGodEdge : currentGods.length > 0;
+  if (!civilianEdgeExisted && !godEdgeExisted) {
     const opponents = alive.filter((p) => playerFaction(p) !== "werewolf");
     return opponents.length === 0 ? "werewolf" : undefined;
   }
 
   const livingCivilians = alive.filter(isVillageCivilian).length;
   const livingGods = alive.filter((p) => p.role && playerFaction(p) === "village" && !isVillageCivilian(p)).length;
-  if (initialCivilians.length > 0 && livingCivilians === 0) return "werewolf";
-  if (initialGods.length > 0 && livingGods === 0) return "werewolf";
+  if (civilianEdgeExisted && livingCivilians === 0) return "werewolf";
+  if (godEdgeExisted && livingGods === 0) return "werewolf";
   return undefined;
 }
 
