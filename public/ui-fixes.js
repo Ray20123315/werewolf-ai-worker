@@ -5,6 +5,8 @@
   const staticI18n = () => window.WerewolfGameI18n;
   const staticSources = new WeakMap();
   let timer = 0;
+  let gameObserver = null;
+  let dialogObserver = null;
 
   const LABELS = {
     "zh-TW": { collapse: "縮起", expand: "展開" },
@@ -50,10 +52,9 @@
     });
   }
 
-  // app.js already distinguishes player-authored chat/speech by using source
-  // language auto-detection (no sourceLocale in the request). Fixed game text
-  // always carries sourceLocale and must never leave the browser. Keep the
-  // native fetch path for player text; answer fixed-content translation locally.
+  // Fixed game text always carries sourceLocale and stays local. Player-authored
+  // chat/speech uses source auto-detection and therefore continues through the
+  // native fetch path to the Worker translation endpoint.
   window.fetch = function guardedFetch(input, init) {
     try {
       const raw = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
@@ -141,16 +142,19 @@
     const playerWarning = document.querySelector("#messages .message-chat .translation-warning, #messages .message-speech .translation-warning");
     const status = document.querySelector("#translationStatus");
     if (status && !playerWarning) {
-      status.textContent = "";
+      if (status.textContent) status.textContent = "";
       status.classList.add("hidden");
     }
   }
 
   function syncCollapseButton(button, collapsed) {
-    button.textContent = collapsed ? "+" : "−";
-    button.title = collapsed ? label("expand") : label("collapse");
-    button.setAttribute("aria-label", button.title);
-    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    const symbol = collapsed ? "+" : "−";
+    const title = collapsed ? label("expand") : label("collapse");
+    const expanded = collapsed ? "false" : "true";
+    if (button.textContent !== symbol) button.textContent = symbol;
+    if (button.title !== title) button.title = title;
+    if (button.getAttribute("aria-label") !== title) button.setAttribute("aria-label", title);
+    if (button.getAttribute("aria-expanded") !== expanded) button.setAttribute("aria-expanded", expanded);
   }
 
   function installPanelCollapse() {
@@ -219,25 +223,33 @@
     translateFixedMessages();
   }
 
+  function observeRuntime() {
+    const game = document.querySelector("#game");
+    const dialog = document.querySelector("#confirmDialog");
+    if (game && gameObserver) gameObserver.observe(game, { childList: true, subtree: true });
+    if (dialog && dialogObserver) dialogObserver.observe(dialog, { childList: true, subtree: true });
+  }
+
+  function applyWithoutObserverFeedback() {
+    gameObserver?.disconnect();
+    dialogObserver?.disconnect();
+    try {
+      applyUiFixes();
+    } finally {
+      observeRuntime();
+    }
+  }
+
   function schedule() {
     clearTimeout(timer);
-    timer = setTimeout(applyUiFixes, 0);
+    timer = setTimeout(applyWithoutObserverFeedback, 0);
   }
 
   function init() {
-    applyUiFixes();
-    document.querySelector("#languageSelect")?.addEventListener("change", () => {
-      setTimeout(() => {
-        document.querySelectorAll("[data-panel-collapse]").forEach((button) => {
-          syncCollapseButton(button, button.closest(".panel")?.classList.contains("panel-collapsed"));
-        });
-        applyUiFixes();
-      }, 0);
-    });
-    const game = document.querySelector("#game");
-    if (game) new MutationObserver(schedule).observe(game, { childList: true, subtree: true });
-    const dialog = document.querySelector("#confirmDialog");
-    if (dialog) new MutationObserver(schedule).observe(dialog, { childList: true, subtree: true });
+    gameObserver = new MutationObserver(schedule);
+    dialogObserver = new MutationObserver(schedule);
+    applyWithoutObserverFeedback();
+    document.querySelector("#languageSelect")?.addEventListener("change", schedule);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
