@@ -1,4 +1,5 @@
 export { GameRoom } from "./room";
+import { ROLE_LIST } from "./roles";
 import type { AIConfig } from "./types";
 
 type JsonObject = Record<string, unknown>;
@@ -10,17 +11,25 @@ export default {
 
     try {
       if (request.method === "GET" && url.pathname === "/api/health") {
-        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers", aiMode: "byok" });
+        return json({ ok: true, service: "werewolf-ai-worker", runtime: "cloudflare-workers", aiMode: "byok", mode: "debate-only" });
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/roles") {
+        return json({ roles: ROLE_LIST.map(({ id, name, faction, summary, source, action, passives, foolVariant, aliases, debateAdaptation }) => ({
+          id, name, faction, summary, source, action, passives, foolVariant, aliases, debateAdaptation
+        })) });
       }
 
       if (request.method === "POST" && url.pathname === "/api/rooms") {
         const body = await readJson(request);
         const name = stringField(body, "name");
+        const playerPassword = stringField(body, "playerPassword", 72);
+        const roomPassword = optionalStringField(body, "roomPassword", 72);
         for (let attempt = 0; attempt < 5; attempt += 1) {
           const roomId = randomRoomCode();
           const room = env.GAME_ROOM.getByName(roomId);
           try {
-            return json(await room.initialize(roomId, name), 201);
+            return json(await room.initialize(roomId, name, playerPassword, roomPassword), 201);
           } catch (error) {
             if (error instanceof Error && error.message.includes("ROOM_ALREADY_EXISTS")) continue;
             throw error;
@@ -29,18 +38,18 @@ export default {
         throw new Error("建立房間失敗，請重試");
       }
 
+      const roomInfo = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/info$/);
+      if (roomInfo && request.method === "GET") return json(await env.GAME_ROOM.getByName(roomInfo[1]!).roomInfo());
+
       const aiRun = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/ai\/run$/);
       if (aiRun && request.method === "POST") {
         const body = await readJson(request);
-        const room = env.GAME_ROOM.getByName(aiRun[1]!);
-        return json(await room.runAI(
-          stringField(body, "token"),
-          stringField(body, "playerId"),
-          stringField(body, "apiKey", 1024)
+        return json(await env.GAME_ROOM.getByName(aiRun[1]!).runAI(
+          stringField(body, "token"), stringField(body, "playerId"), stringField(body, "apiKey", 1024)
         ));
       }
 
-      const match = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})(?:\/(join|ai|state|ws))?$/);
+      const match = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})(?:\/(join|login|ai|state|ws))?$/);
       if (!match) return json({ error: "Not found" }, 404);
       const roomId = match[1]!;
       const action = match[2] ?? "state";
@@ -48,30 +57,30 @@ export default {
 
       if (action === "join" && request.method === "POST") {
         const body = await readJson(request);
-        return json(await room.joinHuman(stringField(body, "name")), 201);
-      }
-
-      if (action === "ai" && request.method === "POST") {
-        const body = await readJson(request);
-        return json(await room.addAI(
-          stringField(body, "token"),
-          stringField(body, "name"),
-          parseAIConfig(body)
+        return json(await room.joinHuman(
+          stringField(body, "name"), stringField(body, "playerPassword", 72), optionalStringField(body, "roomPassword", 72)
         ), 201);
       }
-
-      if (action === "state" && request.method === "GET") {
-        return json(await room.getStateByToken(url.searchParams.get("token") ?? ""));
+      if (action === "login" && request.method === "POST") {
+        const body = await readJson(request);
+        return json(await room.loginHuman(
+          stringField(body, "name"), stringField(body, "playerPassword", 72), optionalStringField(body, "roomPassword", 72)
+        ));
       }
-
+      if (action === "ai" && request.method === "POST") {
+        const body = await readJson(request);
+        return json(await room.addAI(stringField(body, "token"), stringField(body, "name"), parseAIConfig(body)), 201);
+      }
+      if (action === "state" && request.method === "GET") return json(await room.getStateByToken(url.searchParams.get("token") ?? ""));
       if (action === "ws" && request.method === "GET") return room.fetch(request);
       return json({ error: "Method not allowed" }, 405);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Internal error";
       const status = message.includes("不存在") ? 404
         : message.includes("憑證") || message.includes("只有房主") ? 403
-          : message.startsWith("AI provider HTTP") ? 502
-            : 400;
+          : message.includes("密碼錯誤") || message.includes("名稱或人物密碼錯誤") ? 401
+            : message.startsWith("AI provider HTTP") ? 502
+              : 400;
       return json({ error: message }, status);
     }
   }
@@ -80,10 +89,7 @@ export default {
 function parseAIConfig(body: JsonObject): AIConfig {
   const rawProvider = stringField(body, "provider");
   if (!isAIProvider(rawProvider)) throw new Error("AI provider 無效");
-  const config: AIConfig = {
-    provider: rawProvider,
-    model: stringField(body, "model", 120)
-  };
+  const config: AIConfig = { provider: rawProvider, model: stringField(body, "model", 120) };
   if (rawProvider === "openai-compatible") config.baseUrl = stringField(body, "baseUrl", 500);
   return config;
 }
@@ -102,6 +108,16 @@ function stringField(body: JsonObject, key: string, maxLength = 200): string {
   const value = body[key];
   if (typeof value !== "string" || !value.trim()) throw new Error(`${key} 為必填字串`);
   const trimmed = value.trim();
+  if (trimmed.length > maxLength) throw new Error(`${key} 長度超過限制`);
+  return trimmed;
+}
+
+function optionalStringField(body: JsonObject, key: string, maxLength = 200): string | undefined {
+  const value = body[key];
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") throw new Error(`${key} 必須是字串`);
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
   if (trimmed.length > maxLength) throw new Error(`${key} 長度超過限制`);
   return trimmed;
 }

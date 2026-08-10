@@ -4,176 +4,150 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f4efe8" />
-  <title>狼人議會 — 即時多人狼人殺</title>
-  <meta name="description" content="部署於 Cloudflare Workers 的即時多人狼人殺：AI 選用、BYOK、角色可設定、即時聊天。" />
+  <title>狼人議會 — 辯論式狼人殺</title>
+  <meta name="description" content="Cloudflare Workers 辯論式狼人殺：持久人物登入、完整角色庫、自由聊天、BYOK AI。" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <main class="app-shell">
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="狼人議會首頁">
+  <div class="site-bg"></div>
+  <main class="shell">
+    <header class="brandbar">
+      <a href="/" class="brand" aria-label="回首頁">
         <span class="brand-mark">W</span>
-        <span><strong>狼人議會</strong><small>Werewolf Council</small></span>
+        <span><b>狼人議會</b><small>DEBATE WEREWOLF</small></span>
       </a>
-      <div class="top-actions">
-        <span class="runtime-pill">Cloudflare Workers</span>
-        <button id="leaveButton" class="button button-ghost hidden" type="button">離開房間</button>
+      <div class="brand-actions">
+        <span class="mode-chip">只做辯論式</span>
+        <button id="leaveButton" class="button button-ghost hidden" type="button">離開此裝置上的登入</button>
       </div>
     </header>
 
-    <section id="landing" class="landing">
-      <article class="hero-card">
-        <div class="hero-copy">
-          <p class="eyebrow">REAL-TIME SOCIAL DEDUCTION</p>
-          <h1>把規則交給伺服器，<br />把推理留給玩家。</h1>
-          <p class="hero-lead">真人房可以完全不使用 AI。需要 AI 時，由房主自行提供 API Key；部署者不需要替所有玩家負擔模型費用。</p>
-          <div class="feature-row">
-            <div><strong>AI 選用</strong><span>純真人也能完整遊玩</span></div>
-            <div><strong>BYOK</strong><span>API Key 不寫入房間狀態</span></div>
-            <div><strong>無固定人數上限</strong><span>由 Cloudflare 實際容量決定</span></div>
-          </div>
+    <section id="landing" class="landing-grid hidden">
+      <article class="hero panel">
+        <div class="hero-kicker">CLOUDFLARE WORKERS · SERVER AUTHORITATIVE</div>
+        <h1>資訊、發言、質疑、投票。<br><em>不是追著人砍。</em></h1>
+        <p>房間以 Durable Object 保存；人物使用名稱＋密碼找回。AI 完全選用且由玩家自行提供 API。所有角色都轉成資訊、狀態、票型與階段控制的辯論式規則。</p>
+        <div class="hero-facts">
+          <div><strong id="roleCountFact">—</strong><span>角色 Registry</span></div>
+          <div><strong>0</strong><span>必要 AI</span></div>
+          <div><strong>∞*</strong><span>應用層玩家上限</span></div>
         </div>
-        <div class="hero-rule">
-          <span>遊戲節奏</span>
-          <strong>夜晚</strong><i></i><strong>辯論</strong><i></i><strong>投票</strong>
-          <p>另有即時公開聊天；正式發言仍依序推進。</p>
-        </div>
+        <small class="fineprint">* 無程式硬上限，仍受 Cloudflare 實際資源限制。</small>
       </article>
 
-      <section class="entry-grid" aria-label="房間入口">
-        <form id="createForm" class="surface entry-card">
-          <div class="card-heading">
-            <span class="number-tag">01</span>
-            <div><p>CREATE ROOM</p><h2>建立新房間</h2></div>
-          </div>
-          <label class="field">
-            <span>你的名稱</span>
-            <input name="name" maxlength="24" autocomplete="nickname" required placeholder="例如：Ray" />
-          </label>
-          <div class="entry-note">房間不預設人數上限。角色數量會在大廳由房主調整。</div>
-          <button class="button button-primary" type="submit">建立房間</button>
+      <div class="entry-stack">
+        <form id="createForm" class="panel form-card">
+          <div class="section-heading"><span class="eyebrow">CREATE</span><h2>建立房間</h2></div>
+          <label>你的名稱<input name="name" maxlength="24" autocomplete="nickname" required placeholder="例如：Ray" /></label>
+          <label>人物密碼<input name="playerPassword" minlength="4" maxlength="72" type="password" required autocomplete="new-password" placeholder="至少 4 字元，之後用來找回人物" /></label>
+          <label>房間密碼 <span class="optional">選填</span><input name="roomPassword" maxlength="72" type="password" autocomplete="new-password" placeholder="不填代表拿到房號即可進入" /></label>
+          <button class="button button-primary full" type="submit">建立辯論房</button>
         </form>
 
-        <form id="joinForm" class="surface entry-card">
-          <div class="card-heading">
-            <span class="number-tag">02</span>
-            <div><p>JOIN ROOM</p><h2>加入現有房間</h2></div>
-          </div>
-          <label class="field">
-            <span>房間代碼</span>
-            <input name="roomId" maxlength="6" required placeholder="ABC234" autocapitalize="characters" />
-          </label>
-          <label class="field">
-            <span>你的名稱</span>
-            <input name="name" maxlength="24" autocomplete="nickname" required placeholder="例如：Alice" />
-          </label>
-          <button class="button button-secondary" type="submit">加入房間</button>
+        <form id="goRoomForm" class="panel form-card compact-card">
+          <div class="section-heading"><span class="eyebrow">JOIN</span><h2>前往房間</h2></div>
+          <label>房號<input name="roomId" maxlength="6" required autocapitalize="characters" placeholder="例如：2U64RJ" /></label>
+          <button class="button button-secondary full" type="submit">開啟 /房號</button>
         </form>
-      </section>
+      </div>
+    </section>
+
+    <section id="roomGate" class="gate-wrap hidden">
+      <article class="panel gate-card">
+        <div class="gate-code"><span>ROOM</span><strong id="gateRoomCode">------</strong></div>
+        <h1>進入房間</h1>
+        <p id="gateHint">建立新人物，或用名稱＋人物密碼找回原本身份。</p>
+        <div id="roomPasswordNotice" class="notice hidden">這個房間有設定房間密碼；建立人物與重新登入都必須先通過房間密碼。</div>
+        <div class="auth-grid">
+          <form id="joinForm" class="auth-box">
+            <h2>建立新人物</h2>
+            <label>玩家名稱<input name="name" maxlength="24" autocomplete="nickname" required placeholder="同房不可重名" /></label>
+            <label>人物密碼<input name="playerPassword" minlength="4" maxlength="72" type="password" required autocomplete="new-password" placeholder="至少 4 字元" /></label>
+            <label class="room-password-field">房間密碼<input name="roomPassword" maxlength="72" type="password" autocomplete="current-password" /></label>
+            <button class="button button-primary full" type="submit">建立並加入</button>
+          </form>
+          <form id="loginForm" class="auth-box">
+            <h2>回到原有人物</h2>
+            <label>玩家名稱<input name="name" maxlength="24" autocomplete="username" required placeholder="原本的名稱" /></label>
+            <label>人物密碼<input name="playerPassword" maxlength="72" type="password" required autocomplete="current-password" /></label>
+            <label class="room-password-field">房間密碼<input name="roomPassword" maxlength="72" type="password" autocomplete="current-password" /></label>
+            <button class="button button-secondary full" type="submit">重新登入人物</button>
+          </form>
+        </div>
+      </article>
     </section>
 
     <section id="game" class="game hidden">
-      <section class="room-banner surface">
-        <div class="room-id-block">
-          <span class="meta-label">ROOM CODE</span>
-          <div class="room-code-row"><strong id="roomCode">------</strong><button id="copyRoom" class="icon-button" type="button">複製</button></div>
-        </div>
-        <div class="room-stat"><span>階段</span><strong id="phaseBadge">大廳</strong></div>
+      <section class="panel room-banner">
+        <div class="room-identity"><span class="eyebrow">ROOM</span><div class="room-code-row"><strong id="roomCode">------</strong><button id="copyRoom" class="icon-button" type="button">複製連結</button></div></div>
+        <div class="room-stat"><span>階段</span><strong id="phaseLabel">大廳</strong></div>
         <div class="room-stat"><span>輪次</span><strong id="roundLabel">等待開始</strong></div>
-        <div class="room-stat"><span>玩家</span><strong id="playerCountLabel">1 人</strong></div>
         <div class="room-stat role-stat"><span>你的身份</span><strong id="roleLabel">尚未分配</strong></div>
+        <div class="room-stat"><span>陣營</span><strong id="factionLabel">—</strong></div>
       </section>
 
-      <section id="noticePanel" class="notice hidden" role="status"></section>
+      <div id="noticePanel" class="notice hidden"></div>
 
       <div class="game-grid">
         <div class="main-column">
-          <section class="surface action-card">
-            <div class="section-heading">
-              <div><p>TURN CONTROL</p><h2>本階段操作</h2></div>
-              <span id="actionStatus" class="status-dot">同步中</span>
-            </div>
+          <section class="panel action-card">
+            <div class="section-heading compact-heading"><span class="eyebrow">ACTION</span><h2>本階段操作</h2></div>
             <div id="actionArea" class="action-area"></div>
           </section>
 
-          <section class="surface chat-card">
-            <div class="section-heading">
-              <div><p>LIVE ROOM</p><h2>公開聊天室與辯論紀錄</h2></div>
-              <span class="soft-label">即時同步</span>
-            </div>
+          <section class="panel chat-card">
+            <div class="section-heading compact-heading chat-heading"><div><span class="eyebrow">PUBLIC CHAT</span><h2>公開聊天室與正式紀錄</h2></div><span id="chatStatus" class="status-dot">可聊天</span></div>
             <div id="messages" class="messages" aria-live="polite"></div>
-            <form id="chatForm" class="chat-composer">
-              <textarea id="chatInput" name="message" maxlength="500" rows="2" placeholder="輸入公開聊天訊息…"></textarea>
-              <button id="chatButton" class="button button-secondary" type="submit">送出</button>
+            <form id="chatForm" class="chat-form">
+              <input id="chatInput" maxlength="500" autocomplete="off" placeholder="自由聊天不等於正式發言……" />
+              <button class="button button-secondary" type="submit">送出</button>
             </form>
-            <p id="chatHint" class="microcopy">大廳、白天辯論與投票階段可聊天；夜晚關閉公開聊天。</p>
           </section>
         </div>
 
         <aside class="side-column">
-          <section class="surface players-card">
-            <div class="section-heading compact-heading">
-              <div><p>PLAYERS</p><h2>玩家名單</h2></div>
-              <span id="playerCounter" class="count-chip">0</span>
-            </div>
+          <section class="panel players-card">
+            <div class="section-heading compact-heading"><span class="eyebrow">PLAYERS</span><h2>房內人物</h2></div>
             <div id="players" class="players"></div>
           </section>
 
-          <section id="hostPanel" class="surface host-card hidden">
-            <div class="section-heading compact-heading">
-              <div><p>HOST CONTROL</p><h2>房主設定</h2></div>
-              <span class="host-chip">房主</span>
-            </div>
+          <section id="hostPanel" class="panel host-card hidden">
+            <div class="section-heading compact-heading"><span class="eyebrow">HOST</span><h2>房主管理</h2></div>
 
-            <details open class="control-section">
-              <summary>角色配置</summary>
-              <form id="roleForm" class="role-form">
-                <div class="role-grid">
-                  <label><span>狼人</span><input name="werewolf" type="number" min="1" step="1" /></label>
-                  <label><span>村民</span><input name="villager" type="number" min="0" step="1" /></label>
-                  <label><span>預言家</span><input name="seer" type="number" min="0" max="1" step="1" /></label>
-                  <label><span>女巫</span><input name="witch" type="number" min="0" max="1" step="1" /></label>
-                  <label><span>守衛</span><input name="guard" type="number" min="0" max="1" step="1" /></label>
-                </div>
-                <p id="roleValidation" class="validation-text"></p>
-                <button class="button button-ghost full" type="submit">套用角色配置</button>
+            <details open>
+              <summary>遊戲房規</summary>
+              <form id="settingsForm" class="stack-form">
+                <label class="check-row"><input name="sheriffEnabled" type="checkbox" /> 啟用警長選舉</label>
+                <label>死亡資訊<select name="deathInfo"><option value="hidden">完全隱藏</option><option value="names">顯示死者、隱藏死因</option><option value="full">顯示死者與死因</option></select></label>
+                <label>平票處理<select name="tieRule"><option value="no_elimination">平票無人出局</option><option value="revote">全場重投</option><option value="pk_revote">平票玩家 PK 後重投</option></select></label>
+                <button class="button button-ghost full" type="submit">套用房規</button>
               </form>
             </details>
 
-            <details class="control-section">
-              <summary>加入 AI（選用）</summary>
-              <form id="addAIForm" class="ai-form">
-                <label class="field"><span>AI 名稱</span><input name="name" maxlength="24" required placeholder="例如：推理員 A" /></label>
-                <label class="field"><span>Provider</span>
-                  <select name="provider" id="aiProvider">
-                    <option value="openai">OpenAI</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="openai-compatible">OpenAI-compatible</option>
-                  </select>
-                </label>
-                <label class="field"><span>Model</span><input name="model" id="aiModel" required placeholder="例如：gpt-5.6-luna" /></label>
-                <label id="aiBaseUrlField" class="field hidden"><span>API Base URL</span><input name="baseUrl" id="aiBaseUrl" placeholder="https://provider.example/v1" /></label>
-                <label class="field"><span>你的 API Key</span><input name="apiKey" id="aiApiKey" type="password" autocomplete="off" required placeholder="只保留在此瀏覽器工作階段" /></label>
-                <p class="microcopy security-copy">Key 不寫入 Durable Object、GitHub 或 Worker Secrets；每次 AI 回合只暫時送到 Worker 完成該次請求。</p>
+            <details open>
+              <summary>角色配置 <span id="roleSetupTotal" class="summary-count">0 / 0</span></summary>
+              <div class="role-tools"><input id="roleSearch" placeholder="搜尋角色、陣營或技能……" /><button id="zeroRoles" class="icon-button" type="button">全部歸零</button></div>
+              <form id="roleSetupForm">
+                <div id="roleCatalog" class="role-catalog"></div>
+                <button class="button button-secondary full" type="submit">套用角色配置</button>
+              </form>
+              <p id="roleSetupError" class="form-error hidden"></p>
+            </details>
+
+            <details>
+              <summary>選用 AI（BYOK）</summary>
+              <form id="addAIForm" class="stack-form">
+                <label>AI 名稱<input name="name" maxlength="24" required placeholder="例如：Gemini 7號" /></label>
+                <label>Provider<select name="provider" id="aiProvider"><option value="openai">OpenAI GPT</option><option value="gemini">Google Gemini</option><option value="deepseek">DeepSeek</option><option value="openai-compatible">OpenAI-compatible</option></select></label>
+                <label>Model<input name="model" id="aiModel" required value="gpt-5.6-luna" /></label>
+                <label id="aiBaseUrlRow" class="hidden">Base URL<input name="baseUrl" placeholder="https://provider.example/v1" /></label>
+                <label>API Key <span class="optional">只存此瀏覽器 session</span><input name="apiKey" type="password" autocomplete="off" required placeholder="不會寫入房間資料" /></label>
                 <button class="button button-secondary full" type="submit">加入 AI 玩家</button>
               </form>
+              <div id="pendingAIBox" class="pending-ai hidden"></div>
             </details>
 
-            <details id="credentialSection" class="control-section hidden">
-              <summary>AI API Key 管理</summary>
-              <form id="credentialForm" class="credential-form">
-                <label class="field"><span>AI 玩家</span><select id="credentialPlayer"></select></label>
-                <label class="field"><span>API Key</span><input id="credentialKey" type="password" autocomplete="off" required placeholder="重新設定本工作階段的 Key" /></label>
-                <button class="button button-ghost full" type="submit">儲存到此分頁</button>
-              </form>
-              <div id="credentialList" class="credential-list"></div>
-            </details>
-
-            <div class="start-zone">
-              <button id="startButton" class="button button-primary full" type="button">開始遊戲</button>
-              <p id="startHint" class="microcopy">至少 3 人，角色總數必須等於玩家數。</p>
-            </div>
+            <div class="host-actions"><button id="startButton" class="button button-primary full" type="button">開始遊戲</button><button id="resetButton" class="button button-ghost full hidden" type="button">回大廳／下一局</button></div>
           </section>
         </aside>
       </div>

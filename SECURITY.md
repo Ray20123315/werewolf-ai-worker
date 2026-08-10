@@ -1,36 +1,39 @@
 # Security
 
-## Credential model
+## 1. Room and player authentication
+
+- Room password is optional; human player password is mandatory for newly created people.
+- Player names are normalized with Unicode NFKC, collapsed whitespace, and a case-insensitive room key before uniqueness checks.
+- Passwords are never stored as plaintext. The Durable Object persists a per-password random salt plus PBKDF2-SHA-256 verifier.
+- Successful player re-login rotates the opaque session token and closes older WebSocket sessions for that player.
+- Repeated incorrect player or room-password attempts are throttled inside the room object. This is a lightweight abuse guard, not a substitute for edge/WAF rate limiting on a public high-risk deployment.
+- A kicked player is not permanently banned. Their old token is invalidated and the name is released. Rejoining during an active game creates a spectator until the next lobby to prevent role reroll abuse.
+- Legacy pre-password people can set a password only while they still possess a valid old session token.
+
+## 2. BYOK AI credentials
 
 This project uses BYOK (bring your own key) for optional AI players.
 
-- The deployer does **not** need to configure OpenAI, Gemini, DeepSeek, or custom-provider secrets in Cloudflare.
-- A room host who adds an AI player supplies that provider credential in their browser.
-- The browser keeps the credential in `sessionStorage` for the current tab/session.
-- When an AI turn is pending, the credential is sent only with that immediate `/api/rooms/:roomId/ai/run` request.
-- The Worker/Durable Object uses it for the provider request and does not write it to `GameState`, Durable Object storage, source code, repository configuration, or application logs.
-- Closing the tab/session removes the browser-held credential; after reopening, the host must enter it again before that AI can act.
+- The deployer does not need shared OpenAI, Gemini, DeepSeek, or custom-provider secrets.
+- The host browser keeps the provider credential in `sessionStorage` for the current browser session.
+- The credential is sent only with the immediate `/api/rooms/:roomId/ai/run` request that needs it.
+- The Worker/Durable Object does not write the API Key to GameState, Durable Object storage, source code, repository configuration, or application logs.
+- Custom OpenAI-compatible Base URLs must use HTTPS.
 
-The credential necessarily transits the deployed Worker for the duration of the provider call. This avoids embedding provider secrets in shipped browser JavaScript while ensuring the deployment owner does not provide or pay for a shared provider key.
+## 3. Private game information
 
-## Room and player credentials
+The canonical room state remains server-side in a `GameRoom` Durable Object. Clients receive a personalized projection only.
 
-Each human player receives an opaque random room token. Treat it as a session credential. Do not share it or log it. WebSocket and state endpoints validate this token before returning personalized state.
+- Regular players do not receive other players' roles.
+- Role-specific inspection results are returned only to the corresponding player.
+- Wolf teammate visibility follows the enabled role's information rules.
+- Spectators joining an active game do not receive a new role.
+- Full roles are revealed when the game ends, except special private-information roles receive only what their role permits during play.
 
-## Private game information
+## 4. Debate-mode security invariant
 
-The canonical room state remains server-side in a `GameRoom` Durable Object. Browser clients receive a personalized projection only:
+Free chat cannot advance the formal debate state. Server-side state validates the current formal speaker and only moves to voting after the debate order is complete. Physical/PvP mechanics from the Minecraft source material are not trusted client actions and are not part of this implementation.
 
-- regular players do not receive other players' roles;
-- werewolves receive only their permitted teammate information;
-- seers receive only their own inspection results;
-- witch and guard private state is scoped to the corresponding player;
-- full roles are revealed only when the game ends.
+## 5. Reporting
 
-## Custom OpenAI-compatible endpoints
-
-Custom provider Base URLs must use HTTPS. Do not enter an endpoint you do not trust: the user-supplied API credential is sent to that endpoint as part of the requested provider call.
-
-## Reporting
-
-If you find a security issue, avoid posting secrets or room tokens in a public issue. Provide the minimum reproducible detail needed to investigate.
+Do not post API Keys, room passwords, player passwords, session tokens, or private role state in a public issue. Provide the minimum reproducible information needed to investigate a security problem.

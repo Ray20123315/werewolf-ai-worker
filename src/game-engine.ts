@@ -1,6 +1,15 @@
-import type { GameState, NightActions, Player, Role, RoleSetup, Team, WitchAction } from "./types";
-
-const SPECIAL_ROLES: readonly Role[] = ["seer", "witch", "guard"];
+import { ROLE_LIST, roleDefinition } from "./roles.js";
+import type {
+  Faction,
+  GameState,
+  NightActions,
+  Player,
+  Role,
+  RoleActionPrompt,
+  RoleSetup,
+  Team,
+  WitchAction
+} from "./types";
 
 export function defaultRoleSetup(playerCount: number): RoleSetup {
   const count = Math.max(1, Math.trunc(playerCount));
@@ -9,48 +18,45 @@ export function defaultRoleSetup(playerCount: number): RoleSetup {
   const witch = count >= 6 ? 1 : 0;
   const guard = count >= 8 ? 1 : 0;
   const reserved = werewolf + seer + witch + guard;
-  return {
-    werewolf,
-    villager: Math.max(0, count - reserved),
-    seer,
-    witch,
-    guard
-  };
+  return { werewolf, villager: Math.max(0, count - reserved), seer, witch, guard };
 }
 
 export function growRoleSetup(setup: RoleSetup): RoleSetup {
-  return { ...setup, villager: setup.villager + 1 };
+  return { ...setup, villager: (setup.villager ?? 0) + 1 };
 }
 
 export function roleSetupTotal(setup: RoleSetup): number {
-  return setup.werewolf + setup.villager + setup.seer + setup.witch + setup.guard;
+  return Object.values(setup).reduce((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+}
+
+export function factionCountInSetup(setup: RoleSetup, faction: Faction): number {
+  let total = 0;
+  for (const def of ROLE_LIST) total += def.faction === faction ? (setup[def.id] ?? 0) : 0;
+  return total;
 }
 
 export function validateRoleSetup(setup: RoleSetup, playerCount: number): string | undefined {
   for (const [role, raw] of Object.entries(setup)) {
-    if (!Number.isInteger(raw) || raw < 0) return `${role} 數量必須是 0 以上整數`;
+    if (!roleDefinition(role as Role)) return `未知角色：${role}`;
+    if (!Number.isInteger(raw) || (raw ?? -1) < 0) return `${role} 數量必須是 0 以上整數`;
   }
-  if (!Number.isInteger(playerCount) || playerCount < 3) return "至少需要 3 名玩家才能開始";
-  if (setup.werewolf < 1) return "至少需要 1 名狼人";
-  for (const role of SPECIAL_ROLES) {
-    if (setup[role] > 1) return `${role} 目前最多只能設定 1 名`;
-  }
-  if (roleSetupTotal(setup) !== playerCount) return `角色總數必須等於玩家數（目前 ${roleSetupTotal(setup)} / ${playerCount}）`;
-  const villageSide = playerCount - setup.werewolf;
-  if (setup.werewolf >= villageSide) return "開局時狼人數必須少於非狼人玩家數";
+  if (!Number.isInteger(playerCount) || playerCount < 3) return "至少需要 3 名正式玩家才能開始";
+  if (roleSetupTotal(setup) !== playerCount) return `角色總數必須等於正式玩家數（目前 ${roleSetupTotal(setup)} / ${playerCount}）`;
+  const wolves = factionCountInSetup(setup, "werewolf");
+  if (wolves < 1) return "至少需要 1 名狼人陣營角色";
+  if (wolves >= playerCount - wolves) return "開局時狼人陣營人數必須少於其他玩家總數";
   return undefined;
 }
 
 export function roleDeckFromSetup(setup: RoleSetup, playerCount: number): Role[] {
   const error = validateRoleSetup(setup, playerCount);
   if (error) throw new Error(error);
-  return [
-    ...Array<Role>(setup.werewolf).fill("werewolf"),
-    ...Array<Role>(setup.villager).fill("villager"),
-    ...Array<Role>(setup.seer).fill("seer"),
-    ...Array<Role>(setup.witch).fill("witch"),
-    ...Array<Role>(setup.guard).fill("guard")
-  ];
+  const deck: Role[] = [];
+  for (const def of ROLE_LIST) {
+    const count = setup[def.id] ?? 0;
+    for (let i = 0; i < count; i += 1) deck.push(def.id);
+  }
+  return deck;
 }
 
 export function secureShuffle<T>(items: readonly T[]): T[] {
@@ -69,27 +75,54 @@ function secureRandomInt(maxExclusive: number): number {
   const maxUint = 0x1_0000_0000;
   const limit = maxUint - (maxUint % maxExclusive);
   const buffer = new Uint32Array(1);
-  do {
-    crypto.getRandomValues(buffer);
-  } while (buffer[0]! >= limit);
+  do crypto.getRandomValues(buffer); while (buffer[0]! >= limit);
   return buffer[0]! % maxExclusive;
 }
 
+export function activePlayers(players: Player[]): Player[] {
+  return players.filter((p) => !p.isSpectator);
+}
+
 export function assignRoles(players: Player[], setup: RoleSetup): Player[] {
-  const roles = secureShuffle(roleDeckFromSetup(setup, players.length));
-  return players.map((player, index) => ({ ...player, role: roles[index]! }));
+  const participants = activePlayers(players);
+  const roles = secureShuffle(roleDeckFromSetup(setup, participants.length));
+  let index = 0;
+  return players.map((player) => {
+    const next: Player = { ...player };
+    if (player.isSpectator) delete next.role;
+    else next.role = roles[index++]!;
+    return next;
+  });
 }
 
 export function teamForRole(role: Role): Team {
-  return role === "werewolf" ? "werewolf" : "village";
+  return roleDefinition(role).faction;
+}
+
+export function playerFaction(player: Player): Faction | undefined {
+  return player.factionOverride ?? (player.role ? teamForRole(player.role) : undefined);
 }
 
 export function checkWinner(players: Player[]): Team | undefined {
-  const alive = players.filter((p) => p.alive);
-  const wolves = alive.filter((p) => p.role === "werewolf").length;
-  const village = alive.length - wolves;
-  if (wolves === 0) return "village";
-  if (wolves >= village) return "werewolf";
+  const alive = activePlayers(players).filter((p) => p.alive);
+  if (alive.length === 0) return undefined;
+
+  const cowards = alive.filter((p) => p.role === "coward");
+  if (alive.length === 3 && cowards.length === 1) {
+    const others = alive.filter((p) => p.role !== "coward").map(playerFaction);
+    if (others.includes("werewolf") && others.includes("village")) return "neutral";
+  }
+
+  const blood = alive.filter((p) => playerFaction(p) === "blood").length;
+  if (blood > 0 && blood === alive.length) return "blood";
+
+  if (alive.length === 1 && playerFaction(alive[0]!) === "neutral") return "neutral";
+
+  const wolves = alive.filter((p) => playerFaction(p) === "werewolf").length;
+  const spirits = alive.filter((p) => playerFaction(p) === "spirit").length;
+  const nonWolves = alive.length - wolves;
+  if (wolves === 0) return spirits > 0 ? "spirit" : "village";
+  if (wolves >= nonWolves) return "werewolf";
   return undefined;
 }
 
@@ -119,7 +152,6 @@ export function resolveNight(
   const healed = Boolean(wolfTarget && witchAction?.type === "heal" && state.witchHealAvailable);
   const protectedByGuard = Boolean(wolfTarget && guardTarget === wolfTarget);
   const poisonedTarget = witchAction?.type === "poison" && state.witchPoisonAvailable ? witchAction.targetId : undefined;
-
   const deaths = new Set<string>();
   if (wolfTarget && !healed && !protectedByGuard) deaths.add(wolfTarget);
   if (poisonedTarget) deaths.add(poisonedTarget);
@@ -131,15 +163,15 @@ function firstWitchAction(actions: Record<string, WitchAction>): WitchAction | u
 }
 
 export function freshNightActions(): NightActions {
-  return { wolfVotes: {}, seerTargets: {}, guardTargets: {}, witchActions: {} };
+  return { wolfVotes: {}, seerTargets: {}, guardTargets: {}, witchActions: {}, roleActions: {} };
 }
 
 export function livingPlayers(players: Player[]): Player[] {
-  return players.filter((p) => p.alive);
+  return activePlayers(players).filter((p) => p.alive);
 }
 
 export function createDebateOrder(players: Player[]): string[] {
-  return secureShuffle(livingPlayers(players).map((p) => p.id));
+  return secureShuffle(livingPlayers(players).filter((p) => p.role !== "captain").map((p) => p.id));
 }
 
 export function currentDebaterId(order: readonly string[], index: number): string | undefined {
@@ -158,21 +190,109 @@ export function canWitchSelfSave(playerCount: number, round: number): boolean {
   return playerCount <= 10 && round === 1;
 }
 
-export function areNightActionsComplete(state: GameState): boolean {
-  for (const player of livingPlayers(state.players)) {
-    if (!player.role) continue;
-    if (player.role === "werewolf" && !state.nightActions.wolfVotes[player.id]) return false;
-    if (player.role === "seer" && !state.nightActions.seerTargets[player.id]) return false;
-    if (player.role === "guard" && !state.nightActions.guardTargets[player.id]) return false;
-    if (player.role === "witch" && !state.nightActions.witchActions[player.id]) return false;
+export function roleActionPrompt(player: Player, state: GameState): RoleActionPrompt | undefined {
+  if (!player.role || player.isSpectator) return undefined;
+  if (!player.alive && !(state.phase === "reaction" && state.pendingReaction?.actorId === player.id)) return undefined;
+  if (["werewolf", "seer", "guard", "witch"].includes(player.role)) return undefined;
+  const def = roleDefinition(player.role);
+  const action = def.action;
+  if (!action) return undefined;
+  if (player.role === "lurking_wolf" && state.roleMemory[player.id]?.awake !== true) {
+    const otherWolfDead = state.players.some((p) => p.id !== player.id && playerFaction(p) === "werewolf" && !p.alive);
+    if (!otherWolfDead) return undefined;
   }
-  return true;
+  const timingMatches =
+    (action.timing === "night" && state.phase === "night") ||
+    (action.timing === "day" && state.phase === "debate") ||
+    (action.timing === "vote" && state.phase === "vote") ||
+    (action.timing === "reaction" && state.phase === "reaction" && state.pendingReaction?.actorId === player.id) ||
+    (action.timing === "sheriff" && state.phase === "sheriff") ||
+    (action.timing === "setup" && (state.phase === "lobby" || state.phase === "sheriff"));
+  if (!timingMatches) return undefined;
+  if (action.fromRound && state.round < action.fromRound) return undefined;
+  if (action.oncePerGame && state.roleMemory[player.id]?.[`used:${action.effect}`] === true) return undefined;
+  if (state.roleMemory[player.id]?.disabledPermanently === true) return undefined;
+  const disabledUntil = state.roleMemory[player.id]?.disabledUntilRound;
+  if (typeof disabledUntil === "number" && disabledUntil >= state.round) return undefined;
+  return {
+    role: player.role,
+    timing: action.timing,
+    effect: action.effect,
+    targetMode: action.targetMode,
+    ...(action.options ? { options: action.options } : {}),
+    ...(action.oncePerGame ? { oncePerGame: true } : {}),
+    label: def.name,
+    description: def.summary
+  };
+}
+
+export function needsNightAction(state: GameState, player: Player): boolean {
+  if (state.phase !== "night" || !player.alive || player.isSpectator || !player.role) return false;
+  const faction = playerFaction(player);
+  const skipsWolfVote = player.role === "sun_wolf" || player.role === "sniper_eight_wolf" || (player.role === "lurking_wolf" && state.roleMemory[player.id]?.awake !== true) || (player.role === "young_wolf" && state.round <= 3);
+  if (faction === "werewolf" && !skipsWolfVote) {
+    if (!state.nightActions.wolfVotes[player.id]) return true;
+    const special = roleActionPrompt(player, state);
+    if (special?.timing === "night" && !state.nightActions.roleActions[player.id]) return true;
+    return false;
+  }
+  if (faction === "werewolf" && skipsWolfVote) {
+    const special = roleActionPrompt(player, state);
+    return special?.timing === "night" && !state.nightActions.roleActions[player.id];
+  }
+  if (player.role === "seer") return !state.nightActions.seerTargets[player.id];
+  if (player.role === "guard") return !state.nightActions.guardTargets[player.id];
+  if (player.role === "witch") return !state.nightActions.witchActions[player.id];
+  const prompt = roleActionPrompt(player, state);
+  return prompt?.timing === "night" && !state.nightActions.roleActions[player.id];
+}
+
+export function areNightActionsComplete(state: GameState): boolean {
+  return livingPlayers(state.players).every((player) => !needsNightAction(state, player));
 }
 
 export function isAIVotingUnlocked(players: Player[], votes: Record<string, string>): boolean {
   const livingHumans = livingPlayers(players).filter((p) => !p.isAI);
   if (livingHumans.length === 0) return true;
   return livingHumans.some((p) => Boolean(votes[p.id]));
+}
+
+export function effectiveVoteWeight(player: Player, target: Player | undefined, state: GameState): number {
+  if (!player.role) return 1;
+  const passives = new Set(roleDefinition(player.role).passives ?? []);
+  if (passives.has("vote_weight_zero")) return 0;
+  if (passives.has("vote_only_counts_against_non_village") && target && playerFaction(target) === "village") return 0;
+  const bonus = state.roleMemory[player.id]?.voteBonus;
+  return 1 + (typeof bonus === "number" ? Math.max(0, bonus) : 0);
+}
+
+export function weightedVoteCounts(state: GameState): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const [voterId, targetId] of Object.entries(state.votes)) {
+    const voter = state.players.find((p) => p.id === voterId && p.alive && !p.isSpectator);
+    const target = state.players.find((p) => p.id === targetId && p.alive && !p.isSpectator);
+    if (!voter || !target) continue;
+    counts[targetId] = (counts[targetId] ?? 0) + effectiveVoteWeight(voter, target, state);
+  }
+  for (const player of livingPlayers(state.players)) {
+    const raven = state.roleMemory[player.id]?.ravenVote;
+    if (typeof raven === "string" && Object.keys(state.votes).length > 0) counts[raven] = (counts[raven] ?? 0) + 1;
+    const bomb = state.roleMemory[player.id]?.bombHolder;
+    if (typeof bomb === "string" && bomb === player.id) counts[player.id] = (counts[player.id] ?? 0) + 1;
+  }
+  return counts;
+}
+
+export function topWeightedVoteTargets(state: GameState): string[] {
+  const entries = Object.entries(weightedVoteCounts(state)).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (entries.length === 0 || entries[0]![1] <= 0) return [];
+  const top = entries[0]![1];
+  return entries.filter(([, count]) => count === top).map(([id]) => id);
+}
+
+export function weightedPluralityTarget(state: GameState): string | undefined {
+  const top = topWeightedVoteTargets(state);
+  return top.length === 1 ? top[0] : undefined;
 }
 
 export function areVotesComplete(state: GameState): boolean {
