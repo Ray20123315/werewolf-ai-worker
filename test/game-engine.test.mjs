@@ -7,28 +7,37 @@ import {
   checkWinner,
   createDebateOrder,
   currentDebaterId,
+  defaultRoleSetup,
   isAIVotingUnlocked,
   isDebateComplete,
   pluralityTarget,
   resolveNight,
-  roleDeck
+  roleDeckFromSetup,
+  validateRoleSetup
 } from "../.test-build/game-engine.js";
 
 function p(id, role, alive = true, isAI = false) {
   return { id, token: `t-${id}`, name: id, alive, isAI, role, joinedAt: 0 };
 }
 
-test("roleDeck creates a valid 8-player deck", () => {
-  const deck = roleDeck(8);
-  assert.equal(deck.length, 8);
-  assert.equal(deck.filter((r) => r === "werewolf").length, 2);
-  assert.ok(deck.includes("seer"));
-  assert.ok(deck.includes("witch"));
+test("default role setup scales beyond the old 12-player cap", () => {
+  const setup = defaultRoleSetup(30);
+  assert.equal(Object.values(setup).reduce((sum, value) => sum + value, 0), 30);
+  assert.equal(validateRoleSetup(setup, 30), undefined);
+  assert.equal(roleDeckFromSetup(setup, 30).length, 30);
 });
 
-test("roleDeck rejects unsupported player counts", () => {
-  assert.throws(() => roleDeck(4));
-  assert.throws(() => roleDeck(13));
+test("custom role setup is accepted when counts match players", () => {
+  const setup = { werewolf: 2, villager: 5, seer: 1, witch: 1, guard: 1 };
+  assert.equal(validateRoleSetup(setup, 10), undefined);
+  const deck = roleDeckFromSetup(setup, 10);
+  assert.equal(deck.filter((role) => role === "werewolf").length, 2);
+  assert.equal(deck.filter((role) => role === "villager").length, 5);
+});
+
+test("role setup rejects invalid totals or duplicated special roles", () => {
+  assert.match(validateRoleSetup({ werewolf: 1, villager: 1, seer: 0, witch: 0, guard: 0 }, 3) ?? "", /角色總數/);
+  assert.match(validateRoleSetup({ werewolf: 1, villager: 2, seer: 2, witch: 0, guard: 0 }, 5) ?? "", /最多只能設定 1 名/);
 });
 
 test("village wins when no wolves remain", () => {
@@ -82,11 +91,11 @@ test("witch poison adds a second death", () => {
   assert.deepEqual(new Set(result.deaths), new Set(["v", "x"]));
 });
 
-test("witch self-save is first-night-only for ten players or fewer", () => {
+test("witch self-save rule remains stable for larger rooms", () => {
   assert.equal(canWitchSelfSave(10, 1), true);
   assert.equal(canWitchSelfSave(10, 2), false);
   assert.equal(canWitchSelfSave(11, 1), false);
-  assert.equal(canWitchSelfSave(12, 1), false);
+  assert.equal(canWitchSelfSave(30, 1), false);
 });
 
 test("debate order contains every living player exactly once", () => {
