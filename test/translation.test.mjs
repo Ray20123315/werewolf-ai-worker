@@ -3,10 +3,9 @@ import assert from "node:assert/strict";
 import { MAX_AI_KEYS, normalizeCredentialPool, callAIWithKeys } from "../.test-build/ai.js";
 import {
   GOOGLE_TRANSLATE_ENDPOINT,
-  MAX_TRANSLATION_KEYS,
+  MYMEMORY_TRANSLATE_ENDPOINT,
   MAX_TRANSLATION_TEXTS,
   normalizeTranslationLocale,
-  parseGoogleTranslateApiKeys,
   translateTexts,
   validateTranslationTexts
 } from "../.test-build/translate.js";
@@ -18,61 +17,66 @@ test("translation locales are restricted to zh-TW zh-CN and en", () => {
   assert.equal(normalizeTranslationLocale("fr"), undefined);
 });
 
-test("Google translation deployment key pool is deduplicated and bounded", () => {
-  const raw = Array.from({ length: MAX_TRANSLATION_KEYS + 3 }, (_, index) => `key-${index}`).join("\n") + "\nkey-0";
-  assert.deepEqual(parseGoogleTranslateApiKeys(raw), Array.from({ length: MAX_TRANSLATION_KEYS }, (_, index) => `key-${index}`));
-  assert.deepEqual(parseGoogleTranslateApiKeys(" a, b; a\n c "), ["a", "b", "c"]);
-  assert.deepEqual(parseGoogleTranslateApiKeys(undefined), []);
-});
-
 test("translation batch is bounded", () => {
   assert.deepEqual(validateTranslationTexts(["狼人殺", "hello"]), ["狼人殺", "hello"]);
   assert.throws(() => validateTranslationTexts([]), /1~/);
   assert.throws(() => validateTranslationTexts(Array.from({ length: MAX_TRANSLATION_TEXTS + 1 }, () => "x")), /1~/);
-  assert.throws(() => validateTranslationTexts(["x".repeat(1201)]), /1200/);
+  assert.throws(() => validateTranslationTexts(["x".repeat(4201)]), /4200/);
 });
 
-test("Google Cloud Translation v2 preserves ordering and explicit Traditional/Simplified locale codes", async () => {
-  let capturedUrl = "";
-  let capturedBody;
-  const fetcher = async (input, init) => {
-    capturedUrl = String(input);
-    capturedBody = JSON.parse(String(init?.body ?? "{}"));
-    return new Response(JSON.stringify({ data: { translations: [{ translatedText: "狼人杀" }, { translatedText: "你好 &amp; 再见" }] } }), {
+test("Google chat translation matches the provided Userscript client=gtx request shape", async () => {
+  const captured = [];
+  const fetcher = async (input) => {
+    const url = new URL(String(input));
+    captured.push(url);
+    const source = url.searchParams.get("q");
+    const translated = source === "狼人殺" ? "狼人杀" : "你好 & 再见";
+    return new Response(JSON.stringify([[[translated, source, null, null]]]), {
       status: 200,
       headers: { "content-type": "application/json" }
     });
   };
-  assert.deepEqual(await translateTexts(fetcher, ["google-key"], ["狼人殺", "哈囉 & 再見"], "zh-CN", "zh-TW"), ["狼人杀", "你好 & 再见"]);
-  assert.match(capturedUrl, new RegExp(`^${GOOGLE_TRANSLATE_ENDPOINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\?key=`));
-  assert.deepEqual(capturedBody, { q: ["狼人殺", "哈囉 & 再見"], target: "zh-CN", source: "zh-TW", format: "text" });
+
+  assert.deepEqual(
+    await translateTexts(fetcher, ["狼人殺", "哈囉 & 再見"], "zh-CN", "zh-TW"),
+    ["狼人杀", "你好 & 再见"]
+  );
+  assert.equal(captured.length, 2);
+  for (const url of captured) {
+    assert.equal(`${url.origin}${url.pathname}`, GOOGLE_TRANSLATE_ENDPOINT);
+    assert.equal(url.searchParams.get("client"), "gtx");
+    assert.equal(url.searchParams.get("sl"), "auto");
+    assert.equal(url.searchParams.get("tl"), "zh-CN");
+    assert.equal(url.searchParams.get("dt"), "t");
+    assert.equal(url.searchParams.has("key"), false);
+  }
 });
 
-test("Google translation retries the next key only for credential quota or transient failures", async () => {
+test("MyMemory is used as a short-text fallback when Google is unavailable", async () => {
   const attempted = [];
   const fetcher = async (input) => {
     const url = new URL(String(input));
-    const key = url.searchParams.get("key");
-    attempted.push(key);
-    if (key === "bad-key") {
-      return new Response(JSON.stringify({ error: { message: "API key not valid. Please pass a valid API key." } }), {
-        status: 403,
-        headers: { "content-type": "application/json" }
-      });
+    attempted.push(`${url.origin}${url.pathname}`);
+    if (`${url.origin}${url.pathname}` === GOOGLE_TRANSLATE_ENDPOINT) {
+      return new Response("upstream unavailable", { status: 503 });
     }
-    return new Response(JSON.stringify({ data: { translations: [{ translatedText: "Hello" }] } }), {
+    assert.equal(`${url.origin}${url.pathname}`, MYMEMORY_TRANSLATE_ENDPOINT);
+    assert.equal(url.searchParams.get("q"), "你好");
+    assert.equal(url.searchParams.get("langpair"), "zh-TW|en");
+    return new Response(JSON.stringify({ responseData: { translatedText: "Hello" } }), {
       status: 200,
       headers: { "content-type": "application/json" }
     });
   };
-  assert.deepEqual(await translateTexts(fetcher, ["bad-key", "good-key"], ["你好"], "en", "zh-TW"), ["Hello"]);
-  assert.deepEqual(attempted, ["bad-key", "good-key"]);
+
+  assert.deepEqual(await translateTexts(fetcher, ["你好"], "en", "zh-TW"), ["Hello"]);
+  assert.deepEqual(attempted, [GOOGLE_TRANSLATE_ENDPOINT, MYMEMORY_TRANSLATE_ENDPOINT]);
 });
 
-test("same source and target locale skips Google translation and does not require a key", async () => {
+test("same source and target locale skips remote translation and requires no key", async () => {
   let called = false;
   const fetcher = async () => { called = true; throw new Error("should not run"); };
-  assert.deepEqual(await translateTexts(fetcher, [], ["原文"], "zh-TW", "zh-TW"), ["原文"]);
+  assert.deepEqual(await translateTexts(fetcher, ["原文"], "zh-TW", "zh-TW"), ["原文"]);
   assert.equal(called, false);
 });
 
