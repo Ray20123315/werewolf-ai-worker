@@ -328,7 +328,8 @@ function renderPlayers() {
   }).join("");
   document.querySelectorAll("[data-kick]").forEach((button) => button.addEventListener("click", async () => {
     const prompt = await localizedRuntime(`確定踢出 ${nameOf(button.dataset.kick)}？被踢者不是永久封鎖，可重新加入。`);
-    if (confirm(prompt)) send({ type: "kick", targetId: button.dataset.kick });
+    const approved = await confirmAction("kick", prompt);
+    if (approved) send({ type: "kick", targetId: button.dataset.kick });
   }));
 }
 
@@ -749,3 +750,36 @@ function showToast(message, isError = false, sourceLocale = "zh-TW") {
 function showError(error) { showToast(error instanceof Error ? error.message : String(error), true); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]); }
 function escapeAttr(value) { return escapeHtml(value); }
+
+const CONFIRM_SKIP_PREFIX = "werewolf-confirm-skip:";
+
+async function confirmAction(kind, message) {
+  const skipKey = `${CONFIRM_SKIP_PREFIX}${kind}`;
+  if (localStorage.getItem(skipKey) === "1") return true;
+
+  const dialog = $("#confirmDialog");
+  const checkbox = $("#confirmDialogDontShow");
+  if (!dialog || typeof dialog.showModal !== "function" || !checkbox) {
+    showToast("此瀏覽器無法開啟站內確認視窗，操作已取消。", true);
+    return false;
+  }
+
+  $("#confirmDialogTitle").textContent = knownText("確認操作");
+  $("#confirmDialogMessage").textContent = message;
+  $("#confirmDialogDontShowText").textContent = knownText("不再顯示此確認");
+  $("#confirmDialogCancel").textContent = knownText("取消");
+  $("#confirmDialogConfirm").textContent = knownText("確定");
+  checkbox.checked = false;
+  dialog.returnValue = "";
+
+  return new Promise((resolve) => {
+    const onClose = () => {
+      dialog.removeEventListener("close", onClose);
+      const approved = dialog.returnValue === "confirm";
+      if (approved && checkbox.checked) localStorage.setItem(skipKey, "1");
+      resolve(approved);
+    };
+    dialog.addEventListener("close", onClose);
+    dialog.showModal();
+  });
+}

@@ -179,3 +179,28 @@ input:focus, select:focus, textarea:focus { border-color: #b96c64; box-shadow: 0
   .hero h1 { font-size: 43px; }.hero-facts strong { font-size: 26px; }.form-card, .compact-card, .gate-card, .action-card, .chat-card, .players-card, .host-card { padding: 18px; }
   .room-code-row strong { font-size: 21px; }.chat-form { grid-template-columns: 1fr; }.role-card { grid-template-columns: 1fr 56px; }
 }
+
+.confirm-dialog {
+  width: min(440px, calc(100% - 32px));
+  max-width: 440px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xl);
+  color: var(--ink);
+  background: transparent;
+  box-shadow: 0 28px 90px rgba(35, 27, 22, .28);
+}
+.confirm-dialog::backdrop { background: rgba(31, 26, 23, .54); backdrop-filter: blur(3px); }
+.confirm-dialog-card { padding: 24px; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--paper); }
+.confirm-dialog-heading { display: grid; gap: 7px; margin-bottom: 12px; }
+.confirm-dialog-heading h2 { margin: 0; font-size: 21px; }
+.confirm-dialog-message { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.confirm-skip-row { margin: 0 0 18px; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+.confirm-skip-row input { width: auto; margin: 0; }
+.confirm-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.confirm-dialog-actions .button { min-width: 96px; }
+@media (max-width: 520px) {
+  .confirm-dialog-card { padding: 20px; }
+  .confirm-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .confirm-dialog-actions .button { width: 100%; min-width: 0; }
+}

@@ -284,7 +284,8 @@ export function effectiveVoteWeight(player: Player, target: Player | undefined, 
   if (passives.has("vote_weight_zero")) return 0;
   if (passives.has("vote_only_counts_against_non_village") && target && playerFaction(target) === "village") return 0;
   const bonus = state.roleMemory[player.id]?.voteBonus;
-  return 1 + (typeof bonus === "number" ? Math.max(0, bonus) : 0);
+  const sheriffBonus = state.sheriff.sheriffId === player.id ? 1 : 0;
+  return 1 + sheriffBonus + (typeof bonus === "number" ? Math.max(0, bonus) : 0);
 }
 
 export function weightedVoteCounts(state: GameState): Record<string, number> {

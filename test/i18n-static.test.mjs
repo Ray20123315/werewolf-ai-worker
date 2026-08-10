@@ -17,6 +17,9 @@ test("UI dictionary has distinct Traditional Simplified and English product labe
   assert.equal(knownText("最多 8 組，只存此瀏覽器 session", "en"), "Up to 8; stored only in this browser session");
   assert.equal(knownText("平票隨機淘汰 1 人", "zh-CN"), "平票随机淘汰 1 人");
   assert.equal(knownText("平票隨機淘汰 1 人", "en"), "Randomly eliminate 1 tied player");
+  assert.equal(knownText("警長的放逐票計為 2 票。", "en"), "The sheriff's exile vote counts as 2 votes.");
+  assert.equal(knownText("不再顯示此確認", "zh-CN"), "不再显示此确认");
+  assert.equal(knownText("確認操作", "en"), "Confirm action");
 });
 
 test("browser locale normalization keeps zh-TW zh-CN and en separate", () => {
@@ -36,12 +39,19 @@ test("page exposes three-language UI, automatic role setup, and multi-key AI BYO
   assert.match(html, /id="autoRoleSetup"/);
   assert.match(html, /textarea name="apiKeys"/);
   assert.match(html, /value="random_elimination"/);
+  assert.match(html, /警長的放逐票計為 2 票。/);
+  assert.match(html, /id="confirmDialog"/);
+  assert.match(html, /id="confirmDialogDontShow"/);
   assert.match(app, /type: "configure_settings", settings: \{ autoRoleSetup:/);
   assert.match(app, /parseApiKeyPool/);
   assert.match(app, /apiKeys: keys/);
   assert.match(app, /type: "chat", content, locale: getLocale\(\)/);
   assert.match(app, /type: "debate_speech", content, locale: getLocale\(\)/);
   assert.match(app, /\/translate`/);
+  assert.match(app, /confirmAction\("kick", prompt\)/);
+  assert.match(app, /dialog\.showModal\(\)/);
+  assert.match(app, /werewolf-confirm-skip:/);
+  assert.doesNotMatch(app, /confirm\s*\(/);
 });
 
 test("random tie rule is server-authoritative and reuses the normal exile pipeline", () => {
