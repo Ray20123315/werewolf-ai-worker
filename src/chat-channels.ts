@@ -1,3 +1,4 @@
+import { installAIFlowRules } from "./ai-flow.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
 import type { ChatMessage, GameState, Player } from "./types.js";
@@ -62,6 +63,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   };
 
   installHouseRules(GameRoomCtor);
+  installAIFlowRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
