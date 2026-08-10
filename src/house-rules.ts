@@ -1,6 +1,6 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
-import { areVotesComplete, isVillageCivilian, livingPlayers, playerFaction, sheriffSecondVoteKey } from "./game-engine.js";
-import type { ChatMessage, GameState, Player, RoleSetup } from "./types.js";
+import { activePlayers, areVotesComplete, canWitchSelfSave, isVillageCivilian, livingPlayers, playerFaction, sheriffSecondVoteKey } from "./game-engine.js";
+import type { ChatMessage, GameState, Player, WitchAction } from "./types.js";
 
 type RuntimeMessage = ChatMessage & { channel?: "public" | "werewolf" | "lovers"; audienceIds?: string[] };
 type RoomPrototype = Record<string, any> & { __houseRulesInstalled?: boolean };
@@ -10,6 +10,8 @@ type PlayerListWithHouseMeta = Player[] & {
   __initialCivilianEdge?: boolean;
   __initialGodEdge?: boolean;
 };
+
+type WitchPotion = "heal" | "poison";
 
 const MAX_PUBLIC_AI_REPLIES_PER_DAY = 2;
 const MAX_WOLF_AI_MESSAGES_PER_NIGHT = 2;
@@ -27,14 +29,14 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
   proto.__houseRulesInstalled = true;
 
   const originalRequireState = proto.requireState;
-  const originalConfigureRoles = proto.configureRoles;
   const originalConfigureSettings = proto.configureSettings;
-  const originalStartGame = proto.startGame;
   const originalEnterNight = proto.enterNight;
   const originalParticipatesWolfVote = proto.participatesWolfVote;
   const originalFirstLivingWolfId = proto.firstLivingWolfId;
   const originalCastVoteById = proto.castVoteById;
   const originalFinishVote = proto.finishVote;
+  const originalFinishNight = proto.finishNight;
+  const originalValidateWitchAction = proto.validateWitchAction;
   const originalPendingAITask = proto.pendingAITask;
   const originalRunAI = proto.runAI;
   const originalPublicContext = proto.publicContext;
@@ -45,12 +47,8 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     const state = originalRequireState.call(this) as GameState;
     ensureWinCondition(state);
     markWinCondition(state);
+    ensurePerWitchPotions(this, state);
     return state;
-  };
-
-  proto.configureRoles = function (token: string, raw: RoleSetup): void {
-    assertUniqueWitch(raw);
-    return originalConfigureRoles.call(this, token, raw);
   };
 
   proto.configureSettings = function (token: string, raw: Record<string, unknown>): void {
@@ -63,15 +61,27 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     }
   };
 
-  proto.startGame = function (token: string): void {
-    const state = this.requireState() as GameState;
-    assertUniqueWitch(state.roleSetup);
-    return originalStartGame.call(this, token);
+  proto.validateWitchAction = function (state: GameState, actor: Player, action: WitchAction): void {
+    ensurePerWitchPotions(this, state);
+    if (action.type === "heal" && !witchPotionAvailable(this, state, actor.id, "heal")) throw new Error("你的解藥已使用");
+    if (action.type === "poison" && !witchPotionAvailable(this, state, actor.id, "poison")) throw new Error("你的毒藥已使用");
+
+    const legacyHeal = state.witchHealAvailable;
+    const legacyPoison = state.witchPoisonAvailable;
+    state.witchHealAvailable = true;
+    state.witchPoisonAvailable = true;
+    try {
+      originalValidateWitchAction.call(this, state, actor, action);
+    } finally {
+      state.witchHealAvailable = legacyHeal;
+      state.witchPoisonAvailable = legacyPoison;
+    }
   };
 
   proto.enterNight = function (state: GameState, round: number): void {
     ensureWinCondition(state);
     markWinCondition(state);
+    ensurePerWitchPotions(this, state);
     const system = this.systemMem(state) as Record<string, unknown>;
     system.wolfLeaderId = chooseWolfLeader(this, state, originalParticipatesWolfVote);
     system.aiWolfChatRound = round;
@@ -127,6 +137,57 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     } finally {
       const suffix = sheriffSecondVoteKey("");
       for (const key of Object.keys(state.roleMemory)) if (key.endsWith(suffix)) delete state.roleMemory[key];
+    }
+  };
+
+  proto.finishNight = function (state: GameState): void {
+    ensurePerWitchPotions(this, state);
+    const originalActions = state.nightActions.witchActions;
+    const acceptedActions: Record<string, WitchAction> = {};
+    const healers: string[] = [];
+    const poisoners: string[] = [];
+
+    for (const [actorId, action] of Object.entries(originalActions)) {
+      const actor = state.players.find((p) => p.id === actorId && p.role === "witch" && p.alive && !p.isSpectator);
+      if (!actor) continue;
+      if (action.type === "heal") {
+        if (!witchPotionAvailable(this, state, actorId, "heal")) continue;
+        this.mem(state, actorId).witchHealUsed = true;
+        healers.push(actorId);
+      } else if (action.type === "poison") {
+        if (!witchPotionAvailable(this, state, actorId, "poison")) continue;
+        this.mem(state, actorId).witchPoisonUsed = true;
+        poisoners.push(actorId);
+      }
+      acceptedActions[actorId] = action;
+    }
+
+    state.nightActions.witchActions = acceptedActions;
+    const legacyHeal = state.witchHealAvailable;
+    const legacyPoison = state.witchPoisonAvailable;
+    Object.defineProperty(state, "witchHealAvailable", {
+      configurable: true,
+      enumerable: true,
+      get: () => healers.length > 0,
+      set: () => undefined
+    });
+    Object.defineProperty(state, "witchPoisonAvailable", {
+      configurable: true,
+      enumerable: true,
+      get: () => poisoners.length > 0,
+      set: () => undefined
+    });
+
+    let completed = false;
+    try {
+      originalFinishNight.call(this, state);
+      completed = true;
+    } finally {
+      Object.defineProperty(state, "witchHealAvailable", { configurable: true, enumerable: true, writable: true, value: legacyHeal });
+      Object.defineProperty(state, "witchPoisonAvailable", { configurable: true, enumerable: true, writable: true, value: legacyPoison });
+      if (!completed) state.nightActions.witchActions = originalActions;
+      syncLegacyWitchAvailability(this, state);
+      if (completed && typeof this.touchAndSave === "function") this.touchAndSave(state);
     }
   };
 
@@ -231,9 +292,20 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
   proto.projectState = function (state: GameState, token: string): any {
     ensureWinCondition(state);
     markWinCondition(state);
+    ensurePerWitchPotions(this, state);
     const view = originalProjectState.call(this, state, token);
     view.settings.winCondition = (state.settings as any).winCondition;
     const me = this.playerByToken(state, token) as Player;
+    if (me.role === "witch") {
+      const healAvailable = witchPotionAvailable(this, state, me.id, "heal");
+      const poisonAvailable = witchPotionAvailable(this, state, me.id, "poison");
+      view.me.witchHealAvailable = healAvailable;
+      view.me.witchPoisonAvailable = poisonAvailable;
+      const victim = view.me.witchKnownVictim;
+      if (typeof victim === "string") {
+        view.me.witchCanHealKnownVictim = healAvailable && (victim !== me.id || canWitchSelfSave(activePlayers(state.players).length, state.round));
+      }
+    }
     if (playerFaction(me) === "werewolf") {
       const leaderId = (this.systemMem(state) as Record<string, unknown>).wolfLeaderId;
       if (typeof leaderId === "string") view.me.wolfLeaderId = leaderId;
@@ -279,8 +351,30 @@ function markWinCondition(state: GameState): void {
   if (typeof system.initialGodEdge === "boolean") players.__initialGodEdge = system.initialGodEdge;
 }
 
-function assertUniqueWitch(setup: RoleSetup): void {
-  if (Number(setup?.witch ?? 0) > 1) throw new Error("女巫最多只能配置 1 名；每位女巫共享全局藥水會造成結算歧義，因此本規則固定為單女巫。 ");
+function ensurePerWitchPotions(room: any, state: GameState): void {
+  if (state.phase === "lobby") return;
+  const system = (state.roleMemory.__system ??= {}) as Record<string, unknown>;
+  if (system.perWitchPotionsV2 !== true) {
+    const witches = state.players.filter((p) => p.role === "witch" && !p.isSpectator);
+    if (witches.length === 1) {
+      const memory = room.mem(state, witches[0]!.id) as Record<string, unknown>;
+      if (state.witchHealAvailable === false) memory.witchHealUsed = true;
+      if (state.witchPoisonAvailable === false) memory.witchPoisonUsed = true;
+    }
+    system.perWitchPotionsV2 = true;
+  }
+  syncLegacyWitchAvailability(room, state);
+}
+
+function witchPotionAvailable(room: any, state: GameState, actorId: string, potion: WitchPotion): boolean {
+  const memory = room.mem(state, actorId) as Record<string, unknown>;
+  return memory[potion === "heal" ? "witchHealUsed" : "witchPoisonUsed"] !== true;
+}
+
+function syncLegacyWitchAvailability(room: any, state: GameState): void {
+  const witches = state.players.filter((p) => p.role === "witch" && p.alive && !p.isSpectator);
+  state.witchHealAvailable = witches.some((p) => witchPotionAvailable(room, state, p.id, "heal"));
+  state.witchPoisonAvailable = witches.some((p) => witchPotionAvailable(room, state, p.id, "poison"));
 }
 
 function chooseWolfLeader(room: any, state: GameState, baseParticipates: Function): string | undefined {
