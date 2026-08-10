@@ -33,7 +33,7 @@ jobs:
               "docs/ROLE_CATALOG.md": "9698e52a84f9da2592ddeb6731cadd3a79384f16",
               "src/roles.ts": "34c248aee66c1b2e3f463b086ab2a6bdcfb489a8",
               "src/types.ts": "2e46a03f29a791a35c10169306c3a293cbc5f6cb",
-              "src/auth.ts": "ae81a5b8189b7d18fda2cd8999eb7697ce5df78",
+              "src/auth.ts": "ae81a5b8189b7d18fda2cd8999eb7697cde5df78",
               "src/game-engine.ts": "6a1c85f196c80afd5c7a468365d50b2af188aaab",
               "src/room.ts": "80f608e89fdf4d9e697bf0a7e311de22e7d6d175",
               "src/index.ts": "e5a3841ea533bee87174cf801ee32690dc82b437",
