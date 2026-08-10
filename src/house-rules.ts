@@ -1,10 +1,15 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
-import { areVotesComplete, livingPlayers, playerFaction, sheriffSecondVoteKey } from "./game-engine.js";
-import type { ChatMessage, GameState, Player } from "./types.js";
+import { areVotesComplete, isVillageCivilian, livingPlayers, playerFaction, sheriffSecondVoteKey } from "./game-engine.js";
+import type { ChatMessage, GameState, Player, RoleSetup } from "./types.js";
 
 type RuntimeMessage = ChatMessage & { channel?: "public" | "werewolf" | "lovers"; audienceIds?: string[] };
 type RoomPrototype = Record<string, any> & { __houseRulesInstalled?: boolean };
 type WinConditionMode = "slaughter_edge" | "slaughter_all";
+type PlayerListWithHouseMeta = Player[] & {
+  __winConditionMode?: WinConditionMode;
+  __initialCivilianEdge?: boolean;
+  __initialGodEdge?: boolean;
+};
 
 const MAX_PUBLIC_AI_REPLIES_PER_DAY = 2;
 const MAX_WOLF_AI_MESSAGES_PER_NIGHT = 2;
@@ -22,11 +27,14 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
   proto.__houseRulesInstalled = true;
 
   const originalRequireState = proto.requireState;
+  const originalConfigureRoles = proto.configureRoles;
   const originalConfigureSettings = proto.configureSettings;
+  const originalStartGame = proto.startGame;
   const originalEnterNight = proto.enterNight;
   const originalParticipatesWolfVote = proto.participatesWolfVote;
   const originalFirstLivingWolfId = proto.firstLivingWolfId;
   const originalCastVoteById = proto.castVoteById;
+  const originalFinishVote = proto.finishVote;
   const originalPendingAITask = proto.pendingAITask;
   const originalRunAI = proto.runAI;
   const originalPublicContext = proto.publicContext;
@@ -40,6 +48,11 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     return state;
   };
 
+  proto.configureRoles = function (token: string, raw: RoleSetup): void {
+    assertUniqueWitch(raw);
+    return originalConfigureRoles.call(this, token, raw);
+  };
+
   proto.configureSettings = function (token: string, raw: Record<string, unknown>): void {
     originalConfigureSettings.call(this, token, raw);
     if (raw?.winCondition === "slaughter_edge" || raw?.winCondition === "slaughter_all") {
@@ -48,6 +61,12 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
       markWinCondition(state);
       this.saveBroadcast(state);
     }
+  };
+
+  proto.startGame = function (token: string): void {
+    const state = this.requireState() as GameState;
+    assertUniqueWitch(state.roleSetup);
+    return originalStartGame.call(this, token);
   };
 
   proto.enterNight = function (state: GameState, round: number): void {
@@ -100,6 +119,15 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
 
     if (areVotesComplete(state)) this.finishVote(state);
     else this.saveBroadcast(state);
+  };
+
+  proto.finishVote = function (state: GameState): void {
+    try {
+      return originalFinishVote.call(this, state);
+    } finally {
+      const suffix = sheriffSecondVoteKey("");
+      for (const key of Object.keys(state.roleMemory)) if (key.endsWith(suffix)) delete state.roleMemory[key];
+    }
   };
 
   proto.decideAIVote = async function (state: GameState, actor: Player, apiKeys: string[]): Promise<string> {
@@ -239,7 +267,20 @@ function ensureWinCondition(state: GameState): void {
 }
 
 function markWinCondition(state: GameState): void {
-  (state.players as any).__winConditionMode = (state.settings as any).winCondition as WinConditionMode;
+  const players = state.players as PlayerListWithHouseMeta;
+  players.__winConditionMode = (state.settings as any).winCondition as WinConditionMode;
+  const system = (state.roleMemory.__system ??= {}) as Record<string, unknown>;
+  const assigned = state.players.filter((p) => !p.isSpectator && Boolean(p.role));
+  if (assigned.length > 0 && typeof system.initialCivilianEdge !== "boolean") {
+    system.initialCivilianEdge = assigned.some((p) => isVillageCivilian(p));
+    system.initialGodEdge = assigned.some((p) => playerFaction(p) === "village" && !isVillageCivilian(p));
+  }
+  if (typeof system.initialCivilianEdge === "boolean") players.__initialCivilianEdge = system.initialCivilianEdge;
+  if (typeof system.initialGodEdge === "boolean") players.__initialGodEdge = system.initialGodEdge;
+}
+
+function assertUniqueWitch(setup: RoleSetup): void {
+  if (Number(setup?.witch ?? 0) > 1) throw new Error("女巫最多只能配置 1 名；每位女巫共享全局藥水會造成結算歧義，因此本規則固定為單女巫。 ");
 }
 
 function chooseWolfLeader(room: any, state: GameState, baseParticipates: Function): string | undefined {
