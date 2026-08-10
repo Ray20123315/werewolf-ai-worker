@@ -22,7 +22,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Normalize patcher public-log replacement
+      - name: Fix patcher public-log matcher
         shell: bash
         run: |
           python <<'PY'
