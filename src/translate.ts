@@ -12,6 +12,7 @@ export const GOOGLE_PREFERENCE_GRACE_MS = 140;
 export const MYMEMORY_MAX_BYTES = 500;
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type TranslationCandidate = { translatedText: string; provider: "google" | "mymemory" };
 
 export function normalizeTranslationLocale(value: unknown): TranslationLocale | undefined {
   if (value === "zh-TW" || value === "zh-CN" || value === "en") return value;
@@ -45,7 +46,7 @@ export async function translateTexts(
   if (!texts.length) return [];
 
   return mapWithConcurrency(texts, GOOGLE_TRANSLATE_MAX_CONCURRENCY, async (text) => {
-    const translated = await translateWithLowLatency(fetcher, text, targetLocale, sourceLocale);
+    const translated = await translateWithLowLatency(fetcher, text, targetLocale);
     if (!translated) throw new Error("玩家聊天翻譯服務暫時無法使用");
     return translated;
   });
@@ -54,22 +55,22 @@ export async function translateTexts(
 async function translateWithLowLatency(
   fetcher: FetchLike,
   text: string,
-  targetLocale: TranslationLocale,
-  sourceLocale?: TranslationLocale
+  targetLocale: TranslationLocale
 ): Promise<string> {
   let winnerChosen = false;
   const googlePromise = translateViaGoogle(fetcher, text, targetLocale).catch(() => "");
   const myMemoryPromise = delay(MYMEMORY_HEDGE_DELAY_MS)
     .then(async () => {
-      if (winnerChosen || !canUseMyMemoryTranslation(text, targetLocale, sourceLocale)) return "";
-      return translateViaMyMemory(fetcher, text, targetLocale, sourceLocale).catch(() => "");
+      if (winnerChosen || !canUseMyMemoryTranslation(text, targetLocale)) return "";
+      return translateViaMyMemory(fetcher, text, targetLocale).catch(() => "");
     })
     .catch(() => "");
 
-  const firstResult = await firstUsefulTranslation([
-    googlePromise.then((translatedText) => ({ translatedText, provider: "google" as const })),
-    myMemoryPromise.then((translatedText) => ({ translatedText, provider: "mymemory" as const }))
-  ]);
+  const candidates: Promise<TranslationCandidate>[] = [
+    googlePromise.then((translatedText) => ({ translatedText, provider: "google" })),
+    myMemoryPromise.then((translatedText) => ({ translatedText, provider: "mymemory" }))
+  ];
+  const firstResult = await firstUsefulTranslation(candidates);
 
   if (!firstResult) {
     winnerChosen = true;
@@ -110,12 +111,9 @@ async function translateViaGoogle(fetcher: FetchLike, text: string, targetLocale
 async function translateViaMyMemory(
   fetcher: FetchLike,
   text: string,
-  targetLocale: TranslationLocale,
-  sourceLocale?: TranslationLocale
+  targetLocale: TranslationLocale
 ): Promise<string> {
-  const source = sourceLocale && sourceLocale !== targetLocale
-    ? sourceLocale
-    : detectSourceLanguageCode(text, targetLocale);
+  const source = detectSourceLanguageCode(text, targetLocale);
   if (!source || source === targetLocale || utf8ByteLength(text) > MYMEMORY_MAX_BYTES) return "";
 
   const url = new URL(MYMEMORY_TRANSLATE_ENDPOINT);
@@ -137,14 +135,8 @@ async function translateViaMyMemory(
   return "";
 }
 
-function canUseMyMemoryTranslation(
-  text: string,
-  targetLocale: TranslationLocale,
-  sourceLocale?: TranslationLocale
-): boolean {
-  const source = sourceLocale && sourceLocale !== targetLocale
-    ? sourceLocale
-    : detectSourceLanguageCode(text, targetLocale);
+function canUseMyMemoryTranslation(text: string, targetLocale: TranslationLocale): boolean {
+  const source = detectSourceLanguageCode(text, targetLocale);
   return Boolean(source && source !== targetLocale && utf8ByteLength(text) <= MYMEMORY_MAX_BYTES);
 }
 
