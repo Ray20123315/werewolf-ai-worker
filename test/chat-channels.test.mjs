@@ -73,12 +73,15 @@ test("public AI context excludes secret messages while private context can inclu
   assert.doesNotMatch(room.privateContext(room.state, room.state.players[2]), /狼密/);
 });
 
-test("frontend channel controller contains stable currentTarget reset fix and translated channel labels", () => {
+test("frontend channel controller keeps labels and channels without replacing the game WebSocket", () => {
   const source = readFileSync(new URL("../public/chat-channels.js", import.meta.url), "utf8");
-  assert.match(source, /currentTarget.*aiForm/s);
   assert.match(source, /zh-TW/);
   assert.match(source, /zh-CN/);
   assert.match(source, /Werewolf/);
   assert.match(source, /Lovers/);
-  assert.match(source, /payload\.channel/);
+  assert.match(source, /channelSocket\.send\(JSON\.stringify\(\{ type: "chat", content, channel \}\)\)/);
+  assert.match(source, /const socket = new WebSocket\(/);
+  assert.doesNotMatch(source, /window\.WebSocket\s*=/);
+  assert.doesNotMatch(source, /extends\s+NativeWebSocket/);
+  assert.match(source, /element\.disabled !== disabled/);
 });
