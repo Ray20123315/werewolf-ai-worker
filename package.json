@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "cf-typegen": "wrangler types",
     "typecheck": "wrangler types && tsc --noEmit",
-    "test": "node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test test/game-engine.test.mjs",
+    "test": "node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test test/game-engine.test.mjs test/auth-runtime.test.mjs",
     "verify": "npm run test && npm run typecheck && wrangler deploy --dry-run --outdir .wrangler-dry-run"
   },
   "devDependencies": {
