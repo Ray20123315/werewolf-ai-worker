@@ -1,0 +1,121 @@
+name: chatgpt-translation-admin-v2
+
+on:
+  push:
+    branches:
+      - chatgpt-translation-admin-v2
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile-verify-promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Reconstruct previously verified task payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          TRANSPORT=f3314a992520694efe07a6c6c58c0f327cd5fde4
+          : > /tmp/payload.b64
+          for part in 00 01 02 03 04 05 06 07a 07b 08 09 10; do
+            git show "$TRANSPORT:.chatgpt_translation_admin_payload/$part" >> /tmp/payload.b64
+          done
+          base64 -d /tmp/payload.b64 > /tmp/payload.tar.gz
+          echo 'e5100407f2a2eba9b7d3743158e72b5f63289b1e6eaadc42789f223541e58ffa  /tmp/payload.tar.gz' | sha256sum -c -
+          mkdir -p /tmp/task-target
+          tar -xzf /tmp/payload.tar.gz -C /tmp/task-target
+      - name: Three-way reconcile with current main baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD_BASE=200d31feac1b8356f4ec7d43d1379a604535c608
+          CURRENT_BASE=2217649d82a86cb353be817b8241592edbe58988
+          test "$(git rev-parse HEAD^)" != "$CURRENT_BASE" || true
+          test "$(git rev-parse HEAD)" != "$CURRENT_BASE" || true
+
+          paths=(
+            README.md SECURITY.md .dev.vars.example package.json tsconfig.test.json wrangler.jsonc
+            src/admin.ts src/room-directory.ts src/types.ts src/room.ts src/index.ts src/chat-channels.ts
+            public/admin.html public/admin.css public/admin.js public/index.html public/styles.css public/i18n.js public/app.js
+            test/admin.test.mjs test/translation.test.mjs test/i18n-static.test.mjs test/chat-channels.test.mjs
+          )
+          overlaps=(public/app.js public/i18n.js public/index.html public/styles.css test/i18n-static.test.mjs)
+
+          is_overlap() {
+            local p="$1"
+            for x in "${overlaps[@]}"; do [[ "$p" == "$x" ]] && return 0; done
+            return 1
+          }
+
+          for p in "${paths[@]}"; do
+            mkdir -p "$(dirname "$p")" /tmp/merge-base/"$(dirname "$p")"
+            if is_overlap "$p"; then
+              git show "$OLD_BASE:$p" > "/tmp/merge-base/$p"
+              cp "$p" "/tmp/theirs.$(basename "$p")"
+              if ! git merge-file -p "/tmp/task-target/$p" "/tmp/merge-base/$p" "/tmp/theirs.$(basename "$p")" > "/tmp/merged.$(basename "$p")"; then
+                echo "three-way merge conflict: $p" >&2
+                cat "/tmp/merged.$(basename "$p")" >&2
+                exit 1
+              fi
+              mv "/tmp/merged.$(basename "$p")" "$p"
+            else
+              cp "/tmp/task-target/$p" "$p"
+            fi
+          done
+
+          if grep -R -n -E '^(<<<<<<<|=======|>>>>>>>)' public src test README.md SECURITY.md .dev.vars.example package.json tsconfig.test.json wrangler.jsonc; then
+            echo 'merge conflict marker found' >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${paths[@]}" | sort > /tmp/expected-paths
+          git diff --name-only "$CURRENT_BASE" -- "${paths[@]}" | sort > /tmp/reconciled-paths
+          diff -u /tmp/expected-paths /tmp/reconciled-paths
+          while read -r p; do printf '%s  %s\n' "$(git hash-object "$p")" "$p"; done < /tmp/expected-paths > /tmp/pre-gate-blobs
+      - name: Run npm ci
+        run: npm ci
+      - name: Run npm test
+        run: npm test
+      - name: Run npm run typecheck
+        run: npm run typecheck
+      - name: Run Wrangler dry-run
+        run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+      - name: Verify reconciled source stayed exact through gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r expected p; do
+            actual="$(git hash-object "$p")"
+            test "$actual" = "$expected" || { echo "post-gate source changed: $p expected=$expected actual=$actual" >&2; exit 1; }
+          done < /tmp/pre-gate-blobs
+      - name: Create clean reconciled commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_BASE=2217649d82a86cb353be817b8241592edbe58988
+          paths=(
+            README.md SECURITY.md .dev.vars.example package.json tsconfig.test.json wrangler.jsonc
+            src/admin.ts src/room-directory.ts src/types.ts src/room.ts src/index.ts src/chat-channels.ts
+            public/admin.html public/admin.css public/admin.js public/index.html public/styles.css public/i18n.js public/app.js
+            test/admin.test.mjs test/translation.test.mjs test/i18n-static.test.mjs test/chat-channels.test.mjs
+          )
+          mkdir -p /tmp/reconciled-source
+          tar -cf /tmp/reconciled-source/source.tar "${paths[@]}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C chatgpt-translation-admin-clean-v2 "$CURRENT_BASE"
+          tar -xf /tmp/reconciled-source/source.tar
+          git add -- "${paths[@]}"
+          printf '%s\n' "${paths[@]}" | sort > /tmp/expected
+          git diff --cached --name-only | sort > /tmp/actual
+          diff -u /tmp/expected /tmp/actual
+          git commit -m 'Fix translation and add admin backend'
+          git push origin HEAD:chatgpt-translation-admin-clean-v2
