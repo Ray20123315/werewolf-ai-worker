@@ -1,12 +1,5 @@
 import type { AIConfig, AIProvider } from "./types";
 
-export type AIEnv = Env & Partial<{
-  OPENAI_API_KEY: string;
-  GEMINI_API_KEY: string;
-  DEEPSEEK_API_KEY: string;
-  CUSTOM_OPENAI_API_KEY: string;
-}>;
-
 export interface AIRequest {
   config: AIConfig;
   system: string;
@@ -19,54 +12,32 @@ export interface AIResult {
   model: string;
 }
 
-export async function callAI(env: AIEnv, request: AIRequest): Promise<AIResult> {
+export async function callAI(apiKey: string, request: AIRequest): Promise<AIResult> {
+  const key = requireCredential(apiKey);
   const { provider, model } = request.config;
   switch (provider) {
     case "openai":
-      return callOpenAI(env.OPENAI_API_KEY, model, request.system, request.prompt);
+      return callOpenAI(key, model, request.system, request.prompt);
     case "gemini":
-      return callGemini(env.GEMINI_API_KEY, model, request.system, request.prompt);
+      return callGemini(key, model, request.system, request.prompt);
     case "deepseek":
-      return callDeepSeek(env.DEEPSEEK_API_KEY, model, request.system, request.prompt);
+      return callDeepSeek(key, model, request.system, request.prompt);
     case "openai-compatible":
-      return callOpenAICompatible(
-        env.CUSTOM_OPENAI_API_KEY,
-        env.CUSTOM_OPENAI_BASE_URL,
-        model,
-        request.system,
-        request.prompt
-      );
+      return callOpenAICompatible(key, requireBaseUrl(request.config.baseUrl), model, request.system, request.prompt);
     default:
       return assertNever(provider);
   }
 }
 
-async function callOpenAI(
-  apiKey: string | undefined,
-  model: string,
-  system: string,
-  prompt: string
-): Promise<AIResult> {
-  requireSecret(apiKey, "OPENAI_API_KEY");
+async function callOpenAI(apiKey: string, model: string, system: string, prompt: string): Promise<AIResult> {
   const response = await fetchJson("https://api.openai.com/v1/responses", {
     headers: { Authorization: `Bearer ${apiKey}` },
-    body: {
-      model,
-      store: false,
-      instructions: system,
-      input: prompt
-    }
+    body: { model, store: false, instructions: system, input: prompt }
   });
   return { text: extractOpenAIText(response), provider: "openai", model };
 }
 
-async function callGemini(
-  apiKey: string | undefined,
-  model: string,
-  system: string,
-  prompt: string
-): Promise<AIResult> {
-  requireSecret(apiKey, "GEMINI_API_KEY");
+async function callGemini(apiKey: string, model: string, system: string, prompt: string): Promise<AIResult> {
   const encodedModel = encodeURIComponent(model);
   const response = await fetchJson(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodedModel}:generateContent`,
@@ -88,13 +59,7 @@ async function callGemini(
   return { text, provider: "gemini", model };
 }
 
-async function callDeepSeek(
-  apiKey: string | undefined,
-  model: string,
-  system: string,
-  prompt: string
-): Promise<AIResult> {
-  requireSecret(apiKey, "DEEPSEEK_API_KEY");
+async function callDeepSeek(apiKey: string, model: string, system: string, prompt: string): Promise<AIResult> {
   const response = await fetchJson("https://api.deepseek.com/chat/completions", {
     headers: { Authorization: `Bearer ${apiKey}` },
     body: {
@@ -111,15 +76,13 @@ async function callDeepSeek(
 }
 
 async function callOpenAICompatible(
-  apiKey: string | undefined,
-  baseUrl: string | undefined,
+  apiKey: string,
+  baseUrl: string,
   model: string,
   system: string,
   prompt: string
 ): Promise<AIResult> {
-  requireSecret(apiKey, "CUSTOM_OPENAI_API_KEY");
-  if (!baseUrl?.trim()) throw new Error("CUSTOM_OPENAI_BASE_URL 尚未設定");
-  const response = await fetchJson(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const response = await fetchJson(`${baseUrl}/chat/completions`, {
     headers: { Authorization: `Bearer ${apiKey}` },
     body: {
       model,
@@ -134,10 +97,7 @@ async function callOpenAICompatible(
   return { text: extractChatCompletionText(response), provider: "openai-compatible", model };
 }
 
-async function fetchJson(
-  url: string,
-  options: { headers?: Record<string, string>; body: unknown }
-): Promise<unknown> {
+async function fetchJson(url: string, options: { headers?: Record<string, string>; body: unknown }): Promise<unknown> {
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -145,7 +105,7 @@ async function fetchJson(
       ...(options.headers ?? {})
     },
     body: JSON.stringify(options.body),
-    signal: AbortSignal.timeout(25_000)
+    signal: AbortSignal.timeout(30_000)
   });
   const payload = await response.json().catch(() => undefined) as unknown;
   if (!response.ok) {
@@ -185,14 +145,25 @@ function safeErrorDetail(payload: unknown): string {
   return typeof message === "string" ? message.slice(0, 300) : "";
 }
 
-function requireSecret(value: string | undefined, name: string): asserts value is string {
-  if (!value?.trim()) throw new Error(`${name} 尚未設定；此 AI 將改用本地規則模式`);
+function requireCredential(value: string): string {
+  const key = value.trim();
+  if (!key || key.length > 1024) throw new Error("請輸入有效的 API Key");
+  return key;
+}
+
+function requireBaseUrl(value: string | undefined): string {
+  if (!value?.trim()) throw new Error("OpenAI-compatible Provider 必須設定 Base URL");
+  const parsed = new URL(value.trim());
+  if (parsed.protocol !== "https:") throw new Error("自訂 API Base URL 必須使用 HTTPS");
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local")) {
+    throw new Error("自訂 API Base URL 不可指向本機位址");
+  }
+  return parsed.toString().replace(/\/$/, "");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function asArray(value: unknown): unknown[] {
@@ -210,9 +181,7 @@ export function parseJSONObject(text: string): Record<string, unknown> {
   } catch {
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return asRecord(JSON.parse(trimmed.slice(start, end + 1)));
-    }
+    if (start >= 0 && end > start) return asRecord(JSON.parse(trimmed.slice(start, end + 1)));
     throw new Error("AI 回應不是有效 JSON");
   }
 }
