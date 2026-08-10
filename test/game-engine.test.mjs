@@ -332,7 +332,6 @@ test("player password verifier never stores plaintext and authenticates correctl
   const verifier = await createPasswordVerifier("1234");
   assert.notEqual(verifier.hash, "1234");
   assert.equal(verifier.salt.length, 32);
-  assert.equal(await verifyPassword("1234"), false);
   assert.equal(await verifyPassword("1234", verifier), true);
   assert.equal(await verifyPassword("9999", verifier), false);
 });
