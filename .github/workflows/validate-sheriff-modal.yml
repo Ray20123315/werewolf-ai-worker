@@ -1,0 +1,40 @@
+name: validate-sheriff-modal
+
+on:
+  push:
+    branches:
+      - chatgpt-sheriff-modal-v1
+    paths:
+      - .github/workflows/validate-sheriff-modal.yml
+      - scripts/validate_sheriff_modal_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Apply intended production patch
+        run: python scripts/validate_sheriff_modal_patch.py
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+      - name: Commit validated production files to staging branch
+        shell: bash
+        run: |
+          git config user.name "raychen"
+          git config user.email "150588882+Ray20123315@users.noreply.github.com"
+          git add src/game-engine.ts public/app.js public/index.html public/i18n.js public/styles.css test/game-engine.test.mjs test/i18n-static.test.mjs
+          git diff --cached --check
+          git diff --cached --quiet && { echo "No production changes staged"; exit 1; }
+          git commit -m "Add sheriff double vote and custom confirmation modal"
+          git push origin HEAD:chatgpt-sheriff-modal-v1
