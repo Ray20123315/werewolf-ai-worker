@@ -26,13 +26,14 @@ test("house rules reject ambiguous duplicate witches at configuration and start"
 });
 
 test("AI autonomy has hard conversation caps and never chains from AI chat", () => {
-  const source = readFileSync(new URL("../src/house-rules.ts", import.meta.url), "utf8");
-  assert.match(source, /MAX_PUBLIC_AI_REPLIES_PER_DAY = 2/);
-  assert.match(source, /MAX_WOLF_AI_MESSAGES_PER_NIGHT = 2/);
-  assert.match(source, /PUBLIC_CONTEXT_MESSAGES = 18/);
-  assert.match(source, /command\?\.type !== "chat"/);
-  assert.match(source, /actor\.isAI\) return/);
-  assert.match(source, /\.slice\(-12\)/);
+  const house = readFileSync(new URL("../src/house-rules.ts", import.meta.url), "utf8");
+  const channels = readFileSync(new URL("../src/chat-channels.ts", import.meta.url), "utf8");
+  assert.match(house, /MAX_PUBLIC_AI_REPLIES_PER_DAY = 2/);
+  assert.match(house, /MAX_WOLF_AI_MESSAGES_PER_NIGHT = 2/);
+  assert.match(house, /PUBLIC_CONTEXT_MESSAGES = 18/);
+  assert.match(house, /command\?\.type !== "chat"/);
+  assert.match(house, /actor\.isAI\) return/);
+  assert.match(channels, /\.slice\(-12\)/);
 });
 
 test("wolf kill leader prefers wolf-king style roles before ordinary wolves", () => {
