@@ -31,8 +31,8 @@
     try { return JSON.parse(localStorage.getItem(`werewolf-session:${id}`) || "null")?.token || ""; } catch { return ""; }
   }
 
-  // Prevent the generic game/UI fallback from calling remote translation. The
-  // native fetch reference below is used only for player-authored chat/speech.
+  // Prevent the generic UI/role/system i18n fallback from sending fixed game
+  // content to remote translation. nativeFetch remains reserved for player chat.
   window.fetch = function guardedFetch(input, init) {
     try {
       const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url, location.href);
@@ -71,17 +71,19 @@
   }
 
   async function requestChatTranslations(texts, sourceLocale, targetLocale) {
-    if (!texts.length || sourceLocale === targetLocale) return [...texts];
+    if (!texts.length || (sourceLocale && sourceLocale === targetLocale)) return [...texts];
     const id = roomId();
     const token = roomToken();
     if (!id || !token) throw new Error("missing room translation session");
     const output = [];
     for (let index = 0; index < texts.length; index += 40) {
       const chunk = texts.slice(index, index + 40);
+      const payload = { token, targetLocale, texts: chunk };
+      if (sourceLocale) payload.sourceLocale = sourceLocale;
       const response = await nativeFetch(`/api/rooms/${id}/translate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, sourceLocale, targetLocale, texts: chunk })
+        body: JSON.stringify(payload)
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -92,13 +94,19 @@
   }
 
   async function translatedChatMap(texts, sourceLocale, targetLocale) {
+    const sourceKey = sourceLocale || "auto";
     const unique = [...new Set(texts.map((value) => String(value ?? "").trim()).filter(Boolean))];
-    const missing = unique.filter((source) => !chatCache.has(`${sourceLocale}\u0000${targetLocale}\u0000${source}`));
+    const missing = unique.filter((source) => !chatCache.has(`${sourceKey}\u0000${targetLocale}\u0000${source}`));
     if (missing.length) {
       const translated = await requestChatTranslations(missing, sourceLocale, targetLocale);
-      missing.forEach((source, index) => chatCache.set(`${sourceLocale}\u0000${targetLocale}\u0000${source}`, translated[index] || source));
+      missing.forEach((source, index) => chatCache.set(`${sourceKey}\u0000${targetLocale}\u0000${source}`, translated[index] || source));
     }
-    return new Map(unique.map((source) => [source, sourceLocale === targetLocale ? source : chatCache.get(`${sourceLocale}\u0000${targetLocale}\u0000${source}`) || source]));
+    return new Map(unique.map((source) => [
+      source,
+      sourceLocale && sourceLocale === targetLocale
+        ? source
+        : chatCache.get(`${sourceKey}\u0000${targetLocale}\u0000${source}`) || source
+    ]));
   }
 
   function statusNode() {
@@ -127,7 +135,7 @@
     latestState.messages.forEach((message, index) => {
       const row = rows[index];
       if (!row) return;
-      const sourceLocale = message.sourceLocale || "zh-TW";
+      const sourceLocale = message.sourceLocale || undefined;
       const source = String(message.content ?? "");
       const body = row.querySelector(".message-content");
       const name = row.querySelector(".message-head strong");
@@ -143,17 +151,19 @@
         return;
       }
 
-      if (sourceLocale === targetLocale) {
+      if (sourceLocale && sourceLocale === targetLocale) {
         if (body && body.textContent !== source) body.textContent = source;
         if (body && body.title !== source) body.title = source;
         return;
       }
-      const items = playerGroups.get(sourceLocale) || [];
+      const groupKey = sourceLocale || "";
+      const items = playerGroups.get(groupKey) || [];
       items.push({ row, source });
-      playerGroups.set(sourceLocale, items);
+      playerGroups.set(groupKey, items);
     });
 
-    for (const [sourceLocale, items] of playerGroups) {
+    for (const [groupKey, items] of playerGroups) {
+      const sourceLocale = groupKey || undefined;
       const map = await translatedChatMap(items.map((item) => item.source), sourceLocale, targetLocale);
       if (runGeneration !== generation) return;
       for (const item of items) {
@@ -222,7 +232,7 @@
     const runGeneration = generation;
     translateRoleCatalog();
     translateFixedGameDom();
-    if (!roomId() || locale() === "zh-TW") { clearTranslationError(); return; }
+    if (!roomId()) { clearTranslationError(); return; }
     try {
       await translateMessages(runGeneration);
       if (runGeneration === generation) clearTranslationError();

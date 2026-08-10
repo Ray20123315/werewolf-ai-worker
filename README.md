@@ -63,7 +63,7 @@ stateDiagram-v2
 - 平票：無人出局、全場重投、平票玩家 PK 正式發言後重投。
 - 角色配置可勾選「自動配置角色」；啟用後伺服器會依正式玩家數重算基本板子，玩家加入／離開與開局前都會重新對齊。取消勾選後才可手動調整完整 114 角色。
 
-警長首輪平票會進第二輪；第二輪仍平票則本局無警長。現任警長死亡後，依得票候補順位由仍存活者繼任。
+警長首輪平票會進第二輪；第二輪仍平票則本局無警長。現任警長死亡後，依得票候補順位由仍存活者繼任。警長的放逐票計為 2 票。
 
 ---
 
@@ -123,15 +123,23 @@ stateDiagram-v2
 ### 三語與即時翻譯
 
 - UI 支援 `zh-TW`（繁體中文）、`zh-CN`（简体中文）、`en`（English），選擇會保存在瀏覽器。
-- UI、114 個角色名稱／說明、系統訊息、規則與技能文字使用 repository 內固定三語翻譯；切換語言後直接重繪，不送遠端翻譯。
-- 玩家送出的 `chat` 與 `speech` 保留原文並附發送端語系 metadata；只有觀看者語言不同時才做遠端機器翻譯。
-- 前端透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求玩家文字翻譯；翻譯失敗時顯示原文，不阻塞遊戲流程。
+- UI、114 個角色名稱／說明／辯論改寫、系統訊息、遊戲規則、技能與固定錯誤文字使用 repository 內固定三語翻譯；這些內容不送 Google、MyMemory 或生成式 AI。
+- 玩家送出的 `chat` 與 `speech` 保留原文。真人自由文字不把「介面語言」當成文字來源語言，而由上游翻譯以 `sl=auto` 自動偵測；已知來源語言的 AI 發言仍可附 source locale。
+- 只有觀看者需要跨語言顯示玩家自由文字時，前端才透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求翻譯。翻譯失敗時顯示原文與可見失敗狀態，不把原文永久 cache 成成功翻譯，也不阻塞遊戲流程。
 - Worker 的 Google 主路徑照使用者提供的 Userscript：`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=...&dt=t&q=...`。
-- Google 尚未快速完成時，180ms 後可啟動 MyMemory 短文字備援；若 MyMemory 先回傳，再保留 140ms Google 優先等待窗。
+- Google 先發送；若尚未快速得到可用結果，180ms 後可啟動 MyMemory 短文字備援。MyMemory 先完成時再保留 140ms 的 Google 優先等待窗。
 - MyMemory 備援只處理 UTF-8 不超過 500 bytes 的短文字。
-- 翻譯端點要求有效房間 session，並限制單次筆數與總文字長度，避免成為公開無限制翻譯代理。
-- 這條聊天翻譯鏈路不使用 Google Cloud Translation Basic v2，不需要 `GOOGLE_TRANSLATE_API_KEYS`、Google Cloud Project 或 Worker Secret，也不使用生成式 AI。
-- `translate.googleapis.com` 的 `client=gtx` 路徑不是 Google Cloud Translation 公開 API；上游若改動、限流或失效，聊天翻譯可能暫時不可用，但遊戲會保留原文繼續運作。完整規則見 `docs/I18N_POLICY.md`。
+- 翻譯端點要求有效房間 session，並限制單次筆數、單筆長度與總文字長度，避免成為公開無限制翻譯代理。
+- 這條聊天翻譯鏈路**不是 Google Cloud Translation Basic v2**，不需要 `GOOGLE_TRANSLATE_API_KEYS`、Google Cloud Project、Billing 或翻譯 Worker Secret，也不使用 ChatGPT／Gemini 等生成式 AI。
+- `translate.googleapis.com` 的 `client=gtx` 路徑不是 Google Cloud Translation 公開 API；上游若改動、限流或失效，聊天翻譯可能暫時不可用。完整規則見 `docs/I18N_POLICY.md`。
+
+### 管理後台與房內管理員
+
+- `/admin` 是全站管理後台；API 使用 Worker Secret `ADMIN_PANEL_TOKENS` 的 Bearer Token 驗證，Token 只保存在管理者瀏覽器的 `sessionStorage`。
+- 後台可看已追蹤房間總數、房號、階段、玩家數、房主／房內管理員、聊天翻譯服務狀態，以及最近的 API／翻譯／AI／WebSocket 去敏錯誤。
+- 後台可以進入單一房間檢視、發系統公告、踢出玩家、指定或移除房內管理員；不會顯示人物密碼 verifier、session token、管理員 Token 或玩家 BYOK AI Key。
+- 房主可以指定「房內管理員」。房內管理員目前只取得秩序管理權（例如踢出一般玩家），不能取代房主開始／重開遊戲，也不能修改角色配置與房規；房內管理員不能踢房主或其他房內管理員。
+- 全房間清單由獨立 `RoomDirectory` Durable Object 登記。部署此版本後新建或再次被存取的房間會自動出現在後台；部署前已存在但之後完全沒有流量的休眠房間無法從 Durable Object namespace 反向列舉，可在後台輸入已知房號補登記。
 
 ---
 
@@ -160,12 +168,21 @@ AI 正式發言同時可回傳可選的 **結構化白天技能 action**。例�
 .
 ├─ public/
 │  ├─ index.html
+│  ├─ admin.html
+│  ├─ admin.js
 │  ├─ styles.css
+│  ├─ admin.css
 │  ├─ i18n.js
+│  ├─ game-i18n.js
+│  ├─ role-name-i18n.js
+│  ├─ ui-fixes.css
+│  ├─ ui-fixes.js
 │  └─ app.js
 ├─ src/
 │  ├─ index.ts
 │  ├─ room.ts
+│  ├─ room-directory.ts
+│  ├─ admin.ts
 │  ├─ game-engine.ts
 │  ├─ roles.ts
 │  ├─ auth.ts
@@ -176,7 +193,10 @@ AI 正式發言同時可回傳可選的 **結構化白天技能 action**。例�
 │  ├─ ROLE_CATALOG.md
 │  └─ I18N_POLICY.md
 ├─ test/
-│  └─ game-engine.test.mjs
+│  ├─ game-engine.test.mjs
+│  ├─ translation.test.mjs
+│  ├─ admin.test.mjs
+│  └─ i18n-static.test.mjs
 ├─ .github/workflows/verify.yml
 ├─ SECURITY.md
 ├─ wrangler.jsonc
@@ -220,10 +240,18 @@ npx wrangler deploy
 
 也可使用 Cloudflare Workers Builds 連接 GitHub，Production branch 指向 `main`。
 
-本 repository 不需要部署者提供共享**遊戲 AI** API Key；遊戲 AI 仍由房主 BYOK。玩家聊天翻譯也不需要 Google Cloud Translation API Key 或 Worker Secret，因此不需要設定 `GOOGLE_TRANSLATE_API_KEYS`。
+本 repository 不需要部署者提供共享**遊戲 AI** API Key；遊戲 AI 仍由房主 BYOK。玩家 `chat` / `speech` 翻譯也不需要 Google Cloud Translation API Key 或 Worker Secret，因此不需要設定 `GOOGLE_TRANSLATE_API_KEYS`。
+
+全站管理後台需要至少一組長度 24 字元以上的隨機管理 Token：
+
+```bash
+npx wrangler secret put ADMIN_PANEL_TOKENS
+```
+
+可放最多 8 組，以換行、逗號或分號分隔。管理 Token 不應與人物密碼、房間密碼或遊戲 AI Key 共用。部署完成後由 `/admin` 輸入 Token。
 
 ---
 
 ## 10. 安全
 
-請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；只有跨語言顯示的玩家 `chat` / `speech` 文字會由 Worker 送往 Google `client=gtx` 路徑，必要時以 MyMemory 做短文字備援。固定 UI／角色／系統文字不送遠端翻譯。
+請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；只有跨語言顯示的玩家 `chat` / `speech` 會由 Worker 送往 Google `client=gtx` 路徑，必要時使用 MyMemory 短文字備援。固定 UI／角色／系統文字不送遠端翻譯。管理後台另以 `ADMIN_PANEL_TOKENS` Secret 驗證，診斷錯誤在寫入 `RoomDirectory` 前會先去除常見 credential/token 形式。

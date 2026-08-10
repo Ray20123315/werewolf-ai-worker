@@ -330,6 +330,7 @@ export interface GameState {
   winnerPlayerIds?: string[];
   winnerLabel?: string;
   pendingReaction?: PendingReaction;
+  moderatorIds: string[];
   initialPlayerCount: number;
   createdAt: number;
   updatedAt: number;
@@ -344,6 +345,7 @@ export interface PublicPlayer {
   ai?: AIConfig;
   isHost: boolean;
   isSheriff: boolean;
+  isModerator: boolean;
   role?: Role;
 }
 
@@ -379,6 +381,7 @@ export interface PrivateView {
     name: string;
     alive: boolean;
     isHost: boolean;
+    isModerator: boolean;
     isSpectator: boolean;
     hasPassword: boolean;
     role?: Role;
@@ -421,6 +424,7 @@ export type ClientMessage =
   | { type: "configure_roles"; roles: RoleSetup }
   | { type: "configure_settings"; settings: Partial<GameSettings> }
   | { type: "kick"; targetId: string }
+  | { type: "set_moderator"; targetId: string; enabled: boolean }
   | { type: "sheriff_candidate"; running: boolean }
   | { type: "sheriff_vote"; targetId: string }
   | { type: "debate_speech"; content: string; locale?: AppLocale }

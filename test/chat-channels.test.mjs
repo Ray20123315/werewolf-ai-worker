@@ -40,6 +40,7 @@ test("werewolf chat is only projected to known wolf participants", async () => {
   await room.handleClientMessage("t-a", { type: "chat", channel: "werewolf", content: "刀誰？", locale: "zh-TW" });
   assert.equal(room.state.messages.length, 1);
   assert.equal(room.state.messages[0].channel, "werewolf");
+  assert.equal(room.state.messages[0].sourceLocale, undefined);
   assert.equal(room.projectState(room.state, "t-a").messages.length, 1);
   assert.equal(room.projectState(room.state, "t-b").messages.length, 1);
   assert.equal(room.projectState(room.state, "t-c").messages.length, 0);

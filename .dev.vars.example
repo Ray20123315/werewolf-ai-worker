@@ -3,4 +3,9 @@
 # The game-AI keys are used transiently for the requested AI turn and are not stored in Durable Object state.
 #
 # Player chat/speech translation follows the Userscript-style Google translate.googleapis.com `client=gtx` request
-# with MyMemory as a fallback. It does not require a Google Cloud Translation API key or Worker Secret.
+# with MyMemory as a short-text fallback. It does not require a Google Cloud Translation API key or Worker Secret.
+
+# Global admin backend (/admin). Use a long random token (24+ characters).
+# Multiple admin tokens are supported, separated by comma/newline/semicolon.
+# ADMIN_PANEL_TOKENS=replace-with-a-long-random-admin-token
+# Production should use: npx wrangler secret put ADMIN_PANEL_TOKENS

@@ -55,6 +55,22 @@ type SocketAttachment = { playerId: string; token: string };
 type InitResult = { roomId: string; playerId: string; token: string };
 type JoinResult = { playerId: string; token: string; spectator: boolean };
 type AIJSON = { message?: unknown; targetId?: unknown; targetIds?: unknown; action?: unknown; option?: unknown };
+export interface AdminRoomSnapshot {
+  roomId: string;
+  phase: GameState["phase"];
+  round: number;
+  createdAt: number;
+  updatedAt: number;
+  playerCount: number;
+  aliveCount: number;
+  aiCount: number;
+  spectatorCount: number;
+  websocketCount: number;
+  messageCount: number;
+  hostName: string;
+  settings: GameSettings;
+  players: Array<{ id: string; name: string; alive: boolean; isAI: boolean; isSpectator: boolean; isHost: boolean; isModerator: boolean }>;
+}
 
 const DEFAULT_SETTINGS: GameSettings = { sheriffEnabled: false, deathInfo: "names", tieRule: "no_elimination", autoRoleSetup: false };
 
@@ -97,6 +113,7 @@ export class GameRoom extends DurableObject<Env> {
       debateCompleted: [],
       lastNightDeaths: [],
       deathReasons: {},
+      moderatorIds: [],
       initialPlayerCount: 1,
       createdAt: now,
       updatedAt: now
@@ -115,6 +132,42 @@ export class GameRoom extends DurableObject<Env> {
       phase: state.phase,
       players: state.players.filter((p) => !p.kickedAt).length
     };
+  }
+
+  async adminSnapshot(): Promise<AdminRoomSnapshot> {
+    const state = this.requireState();
+    const players = state.players.filter((p) => !p.kickedAt);
+    const host = players.find((p) => p.id === state.hostPlayerId);
+    return {
+      roomId: state.roomId, phase: state.phase, round: state.round, createdAt: state.createdAt, updatedAt: state.updatedAt,
+      playerCount: players.length, aliveCount: players.filter((p) => p.alive && !p.isSpectator).length,
+      aiCount: players.filter((p) => p.isAI).length, spectatorCount: players.filter((p) => p.isSpectator).length,
+      websocketCount: this.ctx.getWebSockets().length, messageCount: state.messages.length, hostName: host?.name ?? "未知",
+      settings: state.settings,
+      players: players.map((p) => ({ id: p.id, name: p.name, alive: p.alive, isAI: p.isAI, isSpectator: p.isSpectator, isHost: p.id === state.hostPlayerId, isModerator: state.moderatorIds.includes(p.id) }))
+    };
+  }
+
+  async adminKick(targetId: string): Promise<void> {
+    this.kickPlayerInternal(this.requireState(), targetId, "全站管理員");
+  }
+
+  async adminSetModerator(targetId: string, enabled: boolean): Promise<void> {
+    const state = this.requireState();
+    const target = state.players.find((p) => p.id === targetId && !p.kickedAt);
+    if (!target || target.id === state.hostPlayerId || target.isAI) throw new Error("無法調整此玩家的管理員權限");
+    state.moderatorIds = state.moderatorIds.filter((id) => id !== target.id);
+    if (enabled) state.moderatorIds.push(target.id);
+    this.addSystemMessage(state, `${target.name} ${enabled ? "已設為" : "已取消"}房間管理員（全站管理員操作）。`);
+    this.saveBroadcast(state);
+  }
+
+  async adminNotice(content: string): Promise<void> {
+    const state = this.requireState();
+    const text = content.trim().replace(/\s+/g, " ").slice(0, 300);
+    if (!text) throw new Error("管理公告不能為空白");
+    this.addSystemMessage(state, `【管理公告】${text}`);
+    this.saveBroadcast(state);
   }
 
   async joinHuman(name: string, password: string, roomPassword?: string): Promise<JoinResult> {
@@ -183,7 +236,7 @@ export class GameRoom extends DurableObject<Env> {
       this.assertFreshAITask(state, hostToken, playerId, "debate_speech");
       const current = state.players.find((p) => p.id === playerId)!;
       const dayAction = this.normalizeAIDayAction(state, current, decision.action);
-      this.recordDebateSpeech(state, current, decision.message);
+      this.recordDebateSpeech(state, current, decision.message, "zh-TW");
       if (dayAction) this.submitRoleActionInternal(state, current, dayAction.effect, dayAction.targetIds, dayAction.option);
       if (state.phase === "debate") {
         if (isDebateComplete(state.debateOrder, state.debateIndex)) this.enterVote(state);
@@ -247,10 +300,14 @@ export class GameRoom extends DurableObject<Env> {
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (!attachment) return ws.close(1008, "Missing identity");
+    let commandType = "unknown";
     try {
       const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
-      await this.handleClientMessage(attachment.token, JSON.parse(raw) as ClientMessage);
+      const command = JSON.parse(raw) as ClientMessage;
+      commandType = command?.type ?? "unknown";
+      await this.handleClientMessage(attachment.token, command);
     } catch (error) {
+      await this.reportError("websocket", error, `command=${commandType}`).catch(() => undefined);
       ws.send(JSON.stringify({ type: "error", message: error instanceof Error ? error.message : "未知錯誤" } satisfies ServerMessage));
     }
   }
@@ -267,6 +324,7 @@ export class GameRoom extends DurableObject<Env> {
       case "configure_roles": return this.configureRoles(token, command.roles);
       case "configure_settings": return this.configureSettings(token, command.settings);
       case "kick": return this.kickPlayer(token, command.targetId);
+      case "set_moderator": return this.setModerator(token, command.targetId, command.enabled);
       case "sheriff_candidate": return this.setSheriffCandidate(token, command.running);
       case "sheriff_vote": return this.castSheriffVote(token, command.targetId);
       case "debate_speech": return this.submitDebateSpeech(token, command.content, command.locale);
@@ -384,14 +442,35 @@ export class GameRoom extends DurableObject<Env> {
 
   private kickPlayer(token: string, targetId: string): void {
     const state = this.requireState();
+    const actor = this.playerByToken(state, token);
+    const isHost = actor.id === state.hostPlayerId;
+    const isModerator = state.moderatorIds.includes(actor.id);
+    if (!isHost && !isModerator) throw new Error("只有房主或房間管理員可以踢出玩家");
+    if (!isHost && state.moderatorIds.includes(targetId)) throw new Error("房間管理員不能踢出其他管理員");
+    this.kickPlayerInternal(state, targetId, isHost ? "房主" : "房間管理員");
+  }
+
+  private setModerator(token: string, targetId: string, enabled: boolean): void {
+    const state = this.requireState();
     this.assertHost(state, token);
     const target = state.players.find((p) => p.id === targetId && !p.kickedAt);
+    if (!target || target.id === state.hostPlayerId) throw new Error("無法調整此玩家的管理員權限");
+    if (target.isAI) throw new Error("AI 玩家不能設為房間管理員");
+    state.moderatorIds = state.moderatorIds.filter((id) => id !== target.id);
+    if (enabled) state.moderatorIds.push(target.id);
+    this.addSystemMessage(state, `${target.name} ${enabled ? "已設為" : "已取消"}房間管理員。`);
+    this.saveBroadcast(state);
+  }
+
+  private kickPlayerInternal(state: GameState, targetId: string, sourceLabel: string): void {
+    const target = state.players.find((p) => p.id === targetId && !p.kickedAt);
     if (!target) throw new Error("找不到要踢出的玩家");
-    if (target.id === state.hostPlayerId) throw new Error("房主不能踢出自己");
+    if (target.id === state.hostPlayerId) throw new Error("房主不能被踢出");
     const oldName = target.name;
-    this.closePlayerSockets(target.id, 4003, "Kicked by host");
+    this.closePlayerSockets(target.id, 4003, `Kicked by ${sourceLabel}`);
     target.token = randomToken();
     target.kickedAt = Date.now();
+    state.moderatorIds = state.moderatorIds.filter((id) => id !== target.id);
     target.nameKey = `__kicked__:${target.id}`;
     target.name = `${oldName}（已踢出）`;
     if (state.phase === "lobby") {
@@ -403,7 +482,7 @@ export class GameRoom extends DurableObject<Env> {
       target.alive = false;
       target.isSpectator = true;
     }
-    this.addSystemMessage(state, `${oldName} 已被房主踢出；這不是永久封鎖，可重新建立人物加入。`);
+    this.addSystemMessage(state, `${oldName} 已被${sourceLabel}踢出；這不是永久封鎖，可重新建立人物加入。`);
     this.checkAndMaybeEnd(state);
     this.saveBroadcast(state);
   }
@@ -413,7 +492,7 @@ export class GameRoom extends DurableObject<Env> {
     const actor = this.playerByToken(state, token);
     if (state.phase === "night") throw new Error("夜晚為秘密行動階段，公開聊天室暫停");
     if (actor.isSpectator && state.phase !== "lobby" && state.phase !== "ended") throw new Error("觀戰者在進行中的對局不能向存活玩家發言");
-    state.messages.push(this.chatMessage(state, actor, this.normalizeChat(content), this.normalizeMessageLocale(locale)));
+    state.messages.push(this.chatMessage(state, actor, this.normalizeChat(content)));
     this.trimMessages(state);
     this.saveBroadcast(state);
   }
@@ -822,12 +901,12 @@ export class GameRoom extends DurableObject<Env> {
     if (!actor.alive || actor.isSpectator) throw new Error("目前不能參與正式辯論");
     if (currentDebaterId(state.debateOrder, state.debateIndex) !== actor.id) throw new Error("尚未輪到你正式發言");
     if (actor.isAI) throw new Error("AI 玩家由房主透過 BYOK 執行");
-    this.recordDebateSpeech(state, actor, this.normalizeSpeech(content), this.normalizeMessageLocale(locale));
+    this.recordDebateSpeech(state, actor, this.normalizeSpeech(content));
     if (isDebateComplete(state.debateOrder, state.debateIndex)) this.enterVote(state);
     else this.saveBroadcast(state);
   }
 
-  private recordDebateSpeech(state: GameState, actor: Player, text: string, locale: AppLocale = "zh-TW"): void {
+  private recordDebateSpeech(state: GameState, actor: Player, text: string, locale?: AppLocale): void {
     state.messages.push(this.speechMessage(state, actor, text, locale));
     state.debateCompleted.push(actor.id);
     const respondingNobles = livingPlayers(state.players).filter((p) => p.role === "noble" && this.mem(state, p.id).replyTarget === actor.id);
@@ -1376,10 +1455,11 @@ export class GameRoom extends DurableObject<Env> {
       ...(p.isAI && p.ai ? { ai: p.ai } : {}),
       isHost: p.id === state.hostPlayerId,
       isSheriff: p.id === state.sheriff.sheriffId,
+      isModerator: state.moderatorIds.includes(p.id),
       ...(state.phase === "ended" && p.role ? { role: p.role } : {})
     }));
     const privateMe: PrivateView["me"] = {
-      id: me.id, name: me.name, alive: me.alive, isHost: me.id === state.hostPlayerId, isSpectator: me.isSpectator, hasPassword: me.isAI || Boolean(me.password)
+      id: me.id, name: me.name, alive: me.alive, isHost: me.id === state.hostPlayerId, isModerator: state.moderatorIds.includes(me.id), isSpectator: me.isSpectator, hasPassword: me.isAI || Boolean(me.password)
     };
     if (me.role) {
       privateMe.role = me.role;
@@ -1560,8 +1640,8 @@ export class GameRoom extends DurableObject<Env> {
   private asStringArray(value: RoleMemoryValue | undefined): string[] { return Array.isArray(value) && value.every((v) => typeof v === "string") ? [...value] : []; }
 
   private addSystemMessage(state: GameState, content: string): void { state.messages.push({ id: crypto.randomUUID(), playerName: "系統", content, sourceLocale: "zh-TW", kind: "system", createdAt: Date.now(), round: state.round, phase: state.phase }); this.trimMessages(state); }
-  private speechMessage(state: GameState, player: Player, content: string, sourceLocale: AppLocale = "zh-TW"): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, sourceLocale, kind: "speech", createdAt: Date.now(), round: state.round, phase: state.phase }; }
-  private chatMessage(state: GameState, player: Player, content: string, sourceLocale: AppLocale = "zh-TW"): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, sourceLocale, kind: "chat", createdAt: Date.now(), round: state.round, phase: state.phase }; }
+  private speechMessage(state: GameState, player: Player, content: string, sourceLocale?: AppLocale): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, ...(sourceLocale ? { sourceLocale } : {}), kind: "speech", createdAt: Date.now(), round: state.round, phase: state.phase }; }
+  private chatMessage(state: GameState, player: Player, content: string, sourceLocale?: AppLocale): ChatMessage { return { id: crypto.randomUUID(), playerId: player.id, playerName: player.name, content, ...(sourceLocale ? { sourceLocale } : {}), kind: "chat", createdAt: Date.now(), round: state.round, phase: state.phase }; }
   private trimMessages(state: GameState): void { if (state.messages.length > 500) state.messages = state.messages.slice(-500); }
   private normalizeSpeech(content: string): string { const text = content.trim().replace(/\s+/g, " ").slice(0, 900); if (text.length < 2) throw new Error("正式發言至少需要 2 個字元"); return text; }
   private normalizeChat(content: string): string { const text = content.trim().replace(/\s+/g, " ").slice(0, 500); if (!text) throw new Error("聊天訊息不能為空白"); return text; }
@@ -1569,6 +1649,15 @@ export class GameRoom extends DurableObject<Env> {
   private factionName(faction: Faction): string { return ({ village: "好人陣營", werewolf: "狼人陣營", spirit: "怨靈陣營", neutral: "特殊角色", blood: "血族陣營" } satisfies Record<Faction, string>)[faction]; }
 
   private normalizeMessageLocale(locale?: AppLocale): AppLocale { return locale === "zh-CN" || locale === "en" ? locale : "zh-TW"; }
+
+  private async reportError(source: string, error: unknown, detail?: string): Promise<void> {
+    const state = this.loadState();
+    const message = error instanceof Error ? error.message : String(error ?? "未知錯誤");
+    await this.env.ROOM_DIRECTORY.getByName("global").recordError({
+      ...(state?.roomId ? { roomId: state.roomId } : {}),
+      source, category: source === "websocket" ? "websocket" : "room", message, ...(detail ? { detail } : {}), createdAt: Date.now()
+    });
+  }
 
   private closePlayerSockets(playerId: string, code: number, reason: string): void { for (const ws of this.ctx.getWebSockets()) { const a = ws.deserializeAttachment() as SocketAttachment | null; if (a?.playerId === playerId) ws.close(code, reason); } }
   private broadcast(state: GameState): void { for (const ws of this.ctx.getWebSockets()) { const a = ws.deserializeAttachment() as SocketAttachment | null; if (!a) continue; try { ws.send(JSON.stringify({ type: "state", state: this.projectState(state, a.token) } satisfies ServerMessage)); } catch { ws.close(1008, "Invalid session"); } } }
@@ -1591,6 +1680,8 @@ export class GameRoom extends DurableObject<Env> {
     state.roleMemory ??= {};
     state.roleResults ??= {};
     state.deathReasons ??= {};
+    state.moderatorIds ??= [];
+    state.moderatorIds = state.moderatorIds.filter((id) => state.players.some((p) => p.id === id && !p.kickedAt));
     state.initialPlayerCount ??= activePlayers(state.players).length;
     state.nightActions.roleActions ??= {};
     for (const player of state.players) {
