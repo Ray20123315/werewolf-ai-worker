@@ -4,13 +4,13 @@ export { RoomDirectory } from "./room-directory";
 import { classifyDiagnostic, isAdminRequest, parseAdminTokens, sanitizeDiagnosticMessage } from "./admin";
 import { ROLE_LIST } from "./roles";
 import type { AIConfig } from "./types";
-import { normalizeTranslationLocale, parseGoogleTranslateApiKeys, translateTexts, validateTranslationTexts } from "./translate";
+import { normalizeTranslationLocale, translateTexts, validateTranslationTexts } from "./translate";
 
 installChatChannels(GameRoom);
 export { GameRoom };
 
 type JsonObject = Record<string, unknown>;
-type WorkerEnv = Env & { GOOGLE_TRANSLATE_API_KEYS?: string; ADMIN_PANEL_TOKENS?: string };
+type WorkerEnv = Env & { ADMIN_PANEL_TOKENS?: string };
 
 export default {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
@@ -32,8 +32,8 @@ export default {
           service: "werewolf-ai-worker",
           runtime: "cloudflare-workers",
           aiMode: "byok",
-          translation: "google-cloud-v2",
-          translationConfigured: parseGoogleTranslateApiKeys(env.GOOGLE_TRANSLATE_API_KEYS).length > 0,
+          translation: "google-gtx+mymemory-fallback",
+          translationConfigured: true,
           adminConfigured: parseAdminTokens(env.ADMIN_PANEL_TOKENS).length > 0,
           mode: "debate-only"
         });
@@ -78,8 +78,7 @@ export default {
         const sourceLocale = body.sourceLocale === undefined ? undefined : normalizeTranslationLocale(body.sourceLocale);
         if (body.sourceLocale !== undefined && !sourceLocale) throw new Error("sourceLocale 無效");
         const texts = validateTranslationTexts(body.texts);
-        const translationKeys = parseGoogleTranslateApiKeys(env.GOOGLE_TRANSLATE_API_KEYS);
-        return json({ translations: await translateTexts(fetch, translationKeys, texts, targetLocale, sourceLocale), targetLocale });
+        return json({ translations: await translateTexts(fetch, texts, targetLocale, sourceLocale), targetLocale });
       }
 
       const roomInfo = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/info$/);
@@ -154,7 +153,7 @@ async function handleAdmin(request: Request, url: URL, env: WorkerEnv): Promise<
       ok: true,
       roomCount,
       recentErrors: errors,
-      translationConfigured: parseGoogleTranslateApiKeys(env.GOOGLE_TRANSLATE_API_KEYS).length > 0,
+      translationConfigured: true,
       adminConfigured: true
     });
   }
@@ -222,12 +221,12 @@ async function recordApplicationError(env: Env, input: { roomId?: string; source
 }
 
 function statusForError(message: string): number {
-  if (message.includes("管理後台尚未設定") || message.includes("Google 翻譯尚未設定")) return 503;
+  if (message.includes("管理後台尚未設定")) return 503;
   if (message.includes("管理員 Token 無效") || message.includes("名稱或人物密碼錯誤")) return 401;
   if (message.includes("不存在")) return 404;
   if (message.includes("憑證") || message.includes("只有房主") || message.includes("房間管理員")) return 403;
   if (message.includes("密碼錯誤")) return 401;
-  if (message.startsWith("AI provider HTTP") || message.startsWith("Google Translation HTTP")) return 502;
+  if (message.startsWith("AI provider HTTP") || message.includes("玩家聊天翻譯服務暫時無法使用")) return 502;
   return 400;
 }
 

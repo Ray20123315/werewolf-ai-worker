@@ -42,6 +42,9 @@ test("page exposes three-language UI, automatic role setup, and multi-key AI BYO
   assert.match(html, /警長的放逐票計為 2 票。/);
   assert.match(html, /id="confirmDialog"/);
   assert.match(html, /id="confirmDialogDontShow"/);
+  assert.match(html, /\/game-i18n\.js/);
+  assert.match(html, /\/role-name-i18n\.js/);
+  assert.match(html, /\/ui-fixes\.js/);
   assert.match(app, /type: "configure_settings", settings: \{ autoRoleSetup:/);
   assert.match(app, /parseApiKeyPool/);
   assert.match(app, /apiKeys: keys/);
@@ -53,7 +56,7 @@ test("page exposes three-language UI, automatic role setup, and multi-key AI BYO
   assert.match(app, /confirmAction\("kick", prompt\)/);
   assert.match(app, /dialog\.showModal\(\)/);
   assert.match(app, /werewolf-confirm-skip:/);
-  assert.doesNotMatch(app, /confirm\s*\(/);
+  assert.doesNotMatch(app, /\bconfirm\s*\(/);
 });
 
 test("random tie rule is server-authoritative and reuses the normal exile pipeline", () => {
@@ -65,15 +68,20 @@ test("random tie rule is server-authoritative and reuses the normal exile pipeli
   assert.match(room, /topTargets\.length === 1 && target\?\.role === "masochist_cultist"/);
 });
 
-test("server translation endpoint uses authenticated Google Cloud Translation v2 without Workers AI binding", () => {
+test("server translation endpoint is authenticated and uses Userscript-style Google GTX with no Cloud Translation key", () => {
   const index = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
   const translate = readFileSync(new URL("../src/translate.ts", import.meta.url), "utf8");
   const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   assert.match(index, /\/translate\$\/\);/);
   assert.match(index, /getStateByToken\(token\)/);
-  assert.match(index, /GOOGLE_TRANSLATE_API_KEYS/);
-  assert.match(translate, /translation\.googleapis\.com\/language\/translate\/v2/);
-  assert.match(translate, /parseGoogleTranslateApiKeys/);
+  assert.match(index, /translateTexts\(fetch, texts, targetLocale, sourceLocale\)/);
+  assert.doesNotMatch(index, /GOOGLE_TRANSLATE_API_KEYS/);
+  assert.match(translate, /translate\.googleapis\.com\/translate_a\/single/);
+  assert.match(translate, /searchParams\.set\("client", "gtx"\)/);
+  assert.match(translate, /searchParams\.set\("sl", "auto"\)/);
+  assert.match(translate, /MYMEMORY_TRANSLATE_ENDPOINT/);
+  assert.doesNotMatch(translate, /translation\.googleapis\.com\/language\/translate\/v2/);
+  assert.doesNotMatch(translate, /parseGoogleTranslateApiKeys/);
   assert.doesNotMatch(wrangler, /"ai"\s*:\s*\{/);
   assert.doesNotMatch(wrangler, /"binding"\s*:\s*"AI"/);
 });
@@ -122,10 +130,10 @@ test("human chat and speech always use translation auto-detection, including leg
 });
 
 test("translation failures are visible and retryable instead of permanently cached as success", async () => {
-  const result = await ensureTranslations(["你好"], "auto", async () => { throw new Error("Google 翻譯尚未設定 API Key"); }, "en");
+  const result = await ensureTranslations(["你好"], "auto", async () => { throw new Error("玩家聊天翻譯服務暫時無法使用"); }, "en");
   assert.equal(result.ok, false);
   assert.equal(displayText("你好", "auto", "en"), "你好");
-  assert.match(translationFailure("你好", "auto", "en"), /尚未設定/);
+  assert.match(translationFailure("你好", "auto", "en"), /暫時無法使用/);
 });
 
 test("admin backend uses a registry DO, secret bearer auth, and room moderator role without exposing host controls", () => {
@@ -154,4 +162,3 @@ test("admin backend uses a registry DO, secret bearer auth, and room moderator r
   assert.match(adminJs, /sessionStorage\.setItem\(TOKEN_KEY/);
   assert.doesNotMatch(adminJs, /localStorage\.setItem\(TOKEN_KEY/);
 });
-
