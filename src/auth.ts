@@ -1,6 +1,7 @@
 import type { PasswordVerifier } from "./types";
 
-const PBKDF2_ITERATIONS = 120_000;
+const PBKDF2_MAX_ITERATIONS = 100_000;
+const PBKDF2_ITERATIONS = PBKDF2_MAX_ITERATIONS;
 const PASSWORD_BYTES = 32;
 
 export function normalizePlayerName(raw: string): { display: string; key: string } {
@@ -27,7 +28,7 @@ export async function createPasswordVerifier(raw: string, label = "人物密碼"
 
 export async function verifyPassword(raw: string, verifier: PasswordVerifier): Promise<boolean> {
   const password = raw.trim();
-  if (!password || !Number.isInteger(verifier.iterations) || verifier.iterations < 10_000) return false;
+  if (!password || !Number.isInteger(verifier.iterations) || verifier.iterations < 10_000 || verifier.iterations > PBKDF2_MAX_ITERATIONS) return false;
   const salt = hexToBytes(verifier.salt);
   const expected = hexToBytes(verifier.hash);
   const actual = await derive(password, salt, verifier.iterations);
