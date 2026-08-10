@@ -1,5 +1,5 @@
-import { playerFaction } from "./game-engine";
-import type { AppLocale, ChatMessage, GameState, Player } from "./types";
+import { playerFaction } from "./game-engine.js";
+import type { AppLocale, ChatMessage, GameState, Player } from "./types.js";
 
 type ChatChannel = "public" | "werewolf" | "lovers";
 type RuntimeMessage = ChatMessage & {
