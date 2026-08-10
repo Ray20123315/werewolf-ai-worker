@@ -1,0 +1,71 @@
+name: apply-cloudflare-type-fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-cloudflare-type-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Apply current Cloudflare type fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          room = Path('src/room.ts')
+          text = room.read_text(encoding='utf-8')
+          old_pair = 'const [client, server] = Object.values(pair);'
+          new_pair = 'const [client, server] = Object.values(pair) as [WebSocket, WebSocket];'
+          if text.count(old_pair) != 1:
+              raise SystemExit(f'expected exactly one WebSocketPair pattern, got {text.count(old_pair)}')
+          text = text.replace(old_pair, new_pair)
+
+          old_attachment = 'ws.deserializeAttachment<SocketAttachment>()'
+          new_attachment = 'ws.deserializeAttachment() as SocketAttachment | null'
+          if text.count(old_attachment) != 2:
+              raise SystemExit(f'expected exactly two attachment patterns, got {text.count(old_attachment)}')
+          text = text.replace(old_attachment, new_attachment)
+          room.write_text(text, encoding='utf-8')
+
+          package_path = Path('package.json')
+          package = json.loads(package_path.read_text(encoding='utf-8'))
+          package.setdefault('devDependencies', {})['@types/node'] = '22.20.1'
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          tsconfig_path = Path('tsconfig.json')
+          tsconfig = json.loads(tsconfig_path.read_text(encoding='utf-8'))
+          tsconfig['compilerOptions']['types'] = ['./worker-configuration.d.ts', 'node']
+          tsconfig_path.write_text(json.dumps(tsconfig, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+      - name: Install exact dependency graph
+        run: npm install
+      - name: Run game tests
+        run: npm test
+      - name: Generate Cloudflare types and typecheck
+        run: npm run typecheck
+      - name: Wrangler dry-run
+        run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+      - name: Commit verified fix and lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-cloudflare-type-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix current Cloudflare Workers type compatibility'
+          git push origin HEAD:main
