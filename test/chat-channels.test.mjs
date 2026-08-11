@@ -145,8 +145,10 @@ test("generic speech and skill cards are neutral while relationship badges use s
   assert.match(css, /\.pill\.private-relationship\.cupid-private/);
 });
 
-test("runtime role ids are restricted to the audited Word role allowlist", () => {
-  assert.deepEqual([...WORD_ROLE_IDS].sort(), [...ROLE_IDS].sort());
-  assert.deepEqual(unsupportedWordRoleIds(ROLE_IDS), []);
+test("runtime canonical role ids are restricted to the audited Word product allowlist", () => {
+  const canonicalRoleIds = ROLE_IDS.filter((id) => id !== "confirmed_villager");
+  assert.deepEqual([...WORD_ROLE_IDS].sort(), [...canonicalRoleIds].sort());
+  assert.deepEqual(unsupportedWordRoleIds(canonicalRoleIds), []);
+  assert.equal(WORD_ROLE_IDS.includes("confirmed_villager"), false);
   assert.equal(new Set(WORD_ROLE_IDS).size, WORD_ROLE_IDS.length);
 });
