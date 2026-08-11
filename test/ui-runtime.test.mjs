@@ -141,3 +141,34 @@ test("fixed game translation stays local while player chat keeps the native remo
   assert.match(ui, /return nativeFetch\(input, init\)/);
   assert.match(ui, /fixed\.text\(source, targetLocale\)/);
 });
+
+test("role setup is moved into a compact modal and includes lover in the addon identity legend", () => {
+  const ui = source("../public/ui-fixes.js");
+  const css = source("../public/ui-fixes.css");
+
+  assert.match(ui, /const ROLE_DIALOG_ID = "roleSetupDialog"/);
+  assert.match(ui, /function installRoleSetupModal\(\)/);
+  assert.match(ui, /dialog\.showModal\(\)/);
+  assert.match(ui, /className = "role-modal-launcher"/);
+  assert.match(ui, /data-addon-identity-strip/);
+  assert.match(ui, /loverSummary: "由邱比特配對產生；保留本體角色與陣營，不佔本體角色配置數量。"/);
+  assert.match(ui, /loverSummary: "Created by Cupid pairing; keeps the base role and faction and does not consume a base-role slot\."/);
+  assert.match(css, /\.role-setup-dialog/);
+  assert.match(css, /\.role-modal-launcher/);
+  assert.match(css, /\.addon-identity-strip/);
+});
+
+test("compact UI handles fixed lobby copy and responsive headers without remote translation", () => {
+  const ui = source("../public/ui-fixes.js");
+  const css = source("../public/ui-fixes.css");
+  const adminCss = source("../public/admin.css");
+
+  assert.match(ui, /function translateRuntimeFixedText\(source, targetLocale\)/);
+  assert.match(ui, /source === "LOBBY"/);
+  assert.match(ui, /等待房主完成角色配置。/);
+  assert.match(ui, /正式玩家 \(\\d\+\) 人/);
+  assert.match(css, /\.brandbar \{\s*flex-wrap: wrap;/s);
+  assert.match(css, /\.brand-actions \{[\s\S]*flex-wrap: wrap;/);
+  assert.match(adminCss, /\.admin-login \{[\s\S]*padding: clamp\(24px, 4vw, 38px\)/);
+  assert.match(adminCss, /\.admin-shell \.brand-actions \{ flex-wrap: wrap;/);
+});
