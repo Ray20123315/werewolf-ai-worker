@@ -7,6 +7,13 @@
 .room-has-unread { border-color: #b96c64 !important; color: var(--accent) !important; background: #fff7f5 !important; }
 .player-row:has(.role-reveal) .pill.private-inspection { display: none !important; }
 
+/* Red is reserved for actual danger/wolf semantics. Generic speech/skill cards stay neutral. */
+.message-speech, .role-skill { border-left-color: var(--line) !important; }
+.private-relationship-notice { margin: 0 0 9px; padding: 8px 10px; border: 1px solid #cbc4dc; border-left: 3px solid #77668f; border-radius: 10px; background: #f6f3fb; color: #51465f; font-size: 11px; font-weight: 750; line-height: 1.45; }
+.pill.private-relationship { border: 1px solid transparent; font-weight: 800; }
+.pill.private-relationship.lover-private { color: #51465f; background: #f1edf8; border-color: #cbc4dc; }
+.pill.private-relationship.cupid-private { color: #36546a; background: #edf5f8; border-color: #bfd0d8; }
+
 .room-quick-tools { display: grid; grid-template-columns: repeat(4, minmax(70px, .55fr)) minmax(170px, 1.25fr) auto; gap: 0; align-items: stretch; overflow: hidden; box-shadow: none; }
 .room-toolkit-stat, .room-toolkit-sync, .room-toolkit-actions { min-width: 0; padding: 11px 13px; border-right: 1px solid var(--line); }
 .room-toolkit-actions { border-right: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -42,6 +49,7 @@
   .room-toolkit-sync, .room-toolkit-actions { grid-column: 1 / -1; border-top: 1px solid var(--line); border-right: 0; }
   .room-toolkit-actions .icon-button { flex: 1; }
   .room-code-row { flex-wrap: wrap; }
+  .private-relationship-notice { font-size: 10px; }
 }
 
 @media (max-width: 420px) {

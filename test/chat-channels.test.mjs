@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { installChatChannels } from "../.test-build/chat-channels.js";
+import { installRelationshipRules } from "../.test-build/relationship-rules.js";
+import { ROLE_IDS } from "../.test-build/types.js";
+import { WORD_ROLE_IDS, unsupportedWordRoleIds } from "../.test-build/word-role-allowlist.js";
 
 function player(id, role, token = `t-${id}`) {
   return { id, token, name: id, nameKey: id, alive: true, isAI: false, isSpectator: false, role, joinedAt: 0 };
@@ -18,7 +21,7 @@ class FakeRoom {
   trimMessages() {}
   saveBroadcast() { this.saved += 1; }
   async handleClientMessage(_token, _command) { this.publicCalls += 1; }
-  projectState(state, token) { const me = this.playerByToken(state, token); return { messages: [...state.messages], me: { id: me.id, alive: me.alive, isSpectator: me.isSpectator } }; }
+  projectState(state, token) { const me = this.playerByToken(state, token); return { messages: [...state.messages], players: state.players.map(({ token: _token, role: _role, ...p }) => p), me: { id: me.id, alive: me.alive, isSpectator: me.isSpectator } }; }
   publicContext(state) { return state.messages.map((m) => m.content).join("|"); }
   privateContext(state, actor) { return `${this.publicContext(state)}::${actor.id}`; }
 }
@@ -60,6 +63,48 @@ test("lovers chat is only projected to the reciprocal living pair", async () => 
   assert.equal(room.projectState(room.state, "t-c").me.loverId, "a");
 });
 
+test("lover identity remains privately known after a partner dies but secret chat closes", () => {
+  const room = new FakeRoom();
+  room.state = baseState();
+  room.state.players.find((p) => p.id === "a").alive = false;
+  const cView = room.projectState(room.state, "t-c");
+  assert.equal(cView.me.loverId, "a");
+  assert.deepEqual(cView.chatChannels, ["public"]);
+});
+
+test("Cupid privately receives the exact linked pair and other viewers do not", () => {
+  const room = new FakeRoom();
+  const cupid = player("cup", "cupid");
+  const a = player("a", "villager");
+  const b = player("b", "werewolf");
+  room.state = { phase: "night", round: 1, players: [cupid, a, b], messages: [], roleMemory: { cup: { cupidLinkedIds: ["a", "b"] }, a: { lover: "b" }, b: { lover: "a" } } };
+  assert.deepEqual(room.projectState(room.state, "t-cup").me.cupidLinkedIds, ["a", "b"]);
+  assert.equal(room.projectState(room.state, "t-a").me.cupidLinkedIds, undefined);
+  assert.equal(room.projectState(room.state, "t-b").me.cupidLinkedIds, undefined);
+});
+
+test("relationship runtime records a successful Cupid submission only for Cupid", () => {
+  class RelationshipRoom {
+    mem(state, id) { state.roleMemory[id] ??= {}; return state.roleMemory[id]; }
+    submitRoleActionInternal(state, actor, effect, targetIds) {
+      if (effect === "link_lovers") {
+        this.mem(state, targetIds[0]).lover = targetIds[1];
+        this.mem(state, targetIds[1]).lover = targetIds[0];
+      }
+    }
+  }
+  installRelationshipRules(RelationshipRoom);
+  const cupid = player("cup", "cupid");
+  const a = player("a", "villager");
+  const b = player("b", "werewolf");
+  const state = { players: [cupid, a, b], roleMemory: {} };
+  const room = new RelationshipRoom();
+  room.submitRoleActionInternal(state, cupid, "link_lovers", ["a", "b"]);
+  assert.deepEqual(state.roleMemory.cup.cupidLinkedIds, ["a", "b"]);
+  assert.equal(state.roleMemory.a.lover, "b");
+  assert.equal(state.roleMemory.b.lover, "a");
+});
+
 test("unauthorized players cannot write secret channels", async () => {
   const room = new FakeRoom();
   room.state = baseState();
@@ -76,15 +121,32 @@ test("public AI context excludes secret messages while private context can inclu
   assert.doesNotMatch(room.privateContext(room.state, room.state.players[2]), /狼密/);
 });
 
-test("frontend channel controller keeps labels and channels without replacing the game WebSocket", () => {
+test("frontend channel controller shows viewer-private relationship feedback without replacing WebSocket", () => {
   const source = readFileSync(new URL("../public/chat-channels.js", import.meta.url), "utf8");
   assert.match(source, /zh-TW/);
   assert.match(source, /zh-CN/);
   assert.match(source, /Werewolf/);
   assert.match(source, /Lovers/);
+  assert.match(source, /cupidLinkedIds/);
+  assert.match(source, /privateRelationshipNotice/);
+  assert.match(source, /你的戀人/);
+  assert.match(source, /邱比特配對/);
   assert.match(source, /channelSocket\.send\(JSON\.stringify\(\{ type: "chat", content, channel \}\)\)/);
   assert.match(source, /const socket = new WebSocket\(/);
   assert.doesNotMatch(source, /window\.WebSocket\s*=/);
   assert.doesNotMatch(source, /extends\s+NativeWebSocket/);
   assert.match(source, /element\.disabled !== disabled/);
+});
+
+test("generic speech and skill cards are neutral while relationship badges use separate semantics", () => {
+  const css = readFileSync(new URL("../public/room-toolkit.css", import.meta.url), "utf8");
+  assert.match(css, /\.message-speech, \.role-skill \{ border-left-color: var\(--line\) !important; \}/);
+  assert.match(css, /\.pill\.private-relationship\.lover-private/);
+  assert.match(css, /\.pill\.private-relationship\.cupid-private/);
+});
+
+test("runtime role ids are restricted to the audited Word role allowlist", () => {
+  assert.deepEqual([...WORD_ROLE_IDS].sort(), [...ROLE_IDS].sort());
+  assert.deepEqual(unsupportedWordRoleIds(ROLE_IDS), []);
+  assert.equal(new Set(WORD_ROLE_IDS).size, WORD_ROLE_IDS.length);
 });

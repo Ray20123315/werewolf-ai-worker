@@ -5,8 +5,11 @@ import { installEqualVoteRules } from "./equal-vote.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
 import { installInspectionRules } from "./inspection-rules.js";
+import { installRelationshipRules } from "./relationship-rules.js";
 import { installOfficialSourceRules } from "./source-rules.js";
+import { ROLE_IDS } from "./types.js";
 import type { ChatMessage, GameState, Player } from "./types.js";
+import { unsupportedWordRoleIds } from "./word-role-allowlist.js";
 
 type ChatChannel = "public" | "werewolf" | "lovers";
 type RuntimeMessage = ChatMessage & {
@@ -18,6 +21,8 @@ type RoomPrototype = Record<string, any> & { __chatChannelsInstalled?: boolean }
 export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }): void {
   const proto = GameRoomCtor.prototype;
   if (proto.__chatChannelsInstalled) return;
+  const unsupported = unsupportedWordRoleIds(ROLE_IDS);
+  if (unsupported.length) throw new Error(`角色不在酷米家族 Word 白名單：${unsupported.join(", ")}`);
   proto.__chatChannelsInstalled = true;
 
   const originalHandleClientMessage = proto.handleClientMessage;
@@ -39,8 +44,14 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
       .filter((message) => canViewMessage(me.id, message))
       .map(({ audienceIds: _audienceIds, ...message }) => message);
     view.chatChannels = availableChannels(this, state, me);
-    const loverId = reciprocalLivingLoverId(state, me);
+
+    const loverId = reciprocalLoverId(state, me);
     if (loverId) view.me.loverId = loverId;
+
+    if (me.role === "cupid") {
+      const linkedIds = asValidPair(state, state.roleMemory[me.id]?.cupidLinkedIds);
+      if (linkedIds) view.me.cupidLinkedIds = linkedIds;
+    }
     return view;
   };
 
@@ -74,6 +85,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   installAddonIdentityRules(GameRoomCtor);
   installOfficialSourceRules(GameRoomCtor);
   installInspectionRules(GameRoomCtor);
+  installRelationshipRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
@@ -120,12 +132,26 @@ function loversAudience(state: GameState, actor: Player): string[] {
   return loverId ? [actor.id, loverId] : [];
 }
 
-function reciprocalLivingLoverId(state: GameState, actor: Player): string | undefined {
+function reciprocalLoverId(state: GameState, actor: Player): string | undefined {
   const loverId = state.roleMemory[actor.id]?.lover;
   if (typeof loverId !== "string") return undefined;
-  const lover = state.players.find((player) => player.id === loverId && player.alive && !player.isSpectator && !player.kickedAt);
+  const lover = state.players.find((player) => player.id === loverId && !player.isSpectator && !player.kickedAt);
   if (!lover) return undefined;
   return state.roleMemory[lover.id]?.lover === actor.id ? lover.id : undefined;
+}
+
+function reciprocalLivingLoverId(state: GameState, actor: Player): string | undefined {
+  if (!actor.alive || actor.isSpectator || actor.kickedAt) return undefined;
+  const loverId = reciprocalLoverId(state, actor);
+  if (!loverId) return undefined;
+  return state.players.some((player) => player.id === loverId && player.alive && !player.isSpectator && !player.kickedAt) ? loverId : undefined;
+}
+
+function asValidPair(state: GameState, value: unknown): [string, string] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids = [...new Set(value.filter((item): item is string => typeof item === "string"))]
+    .filter((id) => state.players.some((player) => player.id === id && !player.isSpectator && !player.kickedAt));
+  return ids.length === 2 ? [ids[0]!, ids[1]!] : undefined;
 }
 
 function canViewMessage(viewerId: string, message: RuntimeMessage): boolean {
