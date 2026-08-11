@@ -17,7 +17,6 @@ test("UI dictionary has distinct Traditional Simplified and English product labe
   assert.equal(knownText("最多 8 組，只存此瀏覽器 session", "en"), "Up to 8; stored only in this browser session");
   assert.equal(knownText("平票隨機淘汰 1 人", "zh-CN"), "平票随机淘汰 1 人");
   assert.equal(knownText("平票隨機淘汰 1 人", "en"), "Randomly eliminate 1 tied player");
-  assert.equal(knownText("警長的放逐票計為 2 票。", "en"), "The sheriff's exile vote counts as 2 votes.");
   assert.equal(knownText("不再顯示此確認", "zh-CN"), "不再显示此确认");
   assert.equal(knownText("確認操作", "en"), "Confirm action");
 });
@@ -29,7 +28,7 @@ test("browser locale normalization keeps zh-TW zh-CN and en separate", () => {
   assert.equal(normalizeLocale("en-US"), "en");
 });
 
-test("page exposes three-language UI, automatic role setup, multi-key AI BYOK, and split sheriff copy", () => {
+test("page exposes three-language UI, automatic role setup, multi-key AI BYOK, and fixed equal exile voting", () => {
   const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   const house = readFileSync(new URL("../public/house-rules.js", import.meta.url), "utf8");
@@ -39,11 +38,17 @@ test("page exposes three-language UI, automatic role setup, multi-key AI BYOK, a
   assert.match(html, /value="en"/);
   assert.match(html, /id="autoRoleSetup"/);
   assert.match(html, /textarea name="apiKeys"/);
-  assert.match(html, /value="random_elimination"/);
-  assert.match(html, /警長有 2 張放逐票，可投同一人，也可拆投給不同玩家。/);
-  assert.match(house, /sheriffHelp: "警長有 2 張放逐票，可投同一人，也可拆投給不同玩家。"/);
-  assert.match(house, /sheriffHelp: "警长有 2 张放逐票，可投同一人，也可拆投给不同玩家。"/);
-  assert.match(house, /The sheriff has 2 exile ballots/);
+  assert.match(html, /id="tieRuleSelect"/);
+  assert.match(html, /<option value="random_elimination">最高票並列時隨機抽 1 人<\/option>/);
+  assert.doesNotMatch(html, /value="no_elimination"|value="revote"|value="pk_revote"/);
+  assert.match(html, /警長選舉保留；一般放逐投票與其他玩家相同，都是 1 票。/);
+  assert.match(house, /sheriffHelp: "警長選舉保留；一般放逐投票與其他玩家相同，都是 1 票。"/);
+  assert.match(house, /sheriffHelp: "警长选举保留；普通放逐投票与其他玩家相同，都是 1 票。"/);
+  assert.match(house, /Sheriff election stays enabled, but the sheriff has the same single exile vote/);
+  assert.match(house, /tieFixed: "最高票並列時隨機抽 1 人"/);
+  assert.match(house, /tieFixed: "最高票并列时随机抽 1 人"/);
+  assert.match(house, /Randomly eliminate 1 tied top player/);
+  assert.doesNotMatch(house, /sheriffSecond:/);
   assert.match(html, /id="confirmDialog"/);
   assert.match(html, /id="confirmDialogDontShow"/);
   assert.match(html, /\/game-i18n\.js/);
@@ -63,13 +68,15 @@ test("page exposes three-language UI, automatic role setup, multi-key AI BYOK, a
   assert.doesNotMatch(app, /\bconfirm\s*\(/);
 });
 
-test("random tie rule is server-authoritative and reuses the normal exile pipeline", () => {
-  const types = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");
-  const room = readFileSync(new URL("../src/room.ts", import.meta.url), "utf8");
-  assert.match(types, /random_elimination/);
-  assert.match(room, /state\.settings\.tieRule === "random_elimination"/);
-  assert.match(room, /randomTopVoteTarget\(state\)/);
-  assert.match(room, /topTargets\.length === 1 && target\?\.role === "masochist_cultist"/);
+test("equal exile vote runtime is server-authoritative and always resolves a highest-count tie randomly", () => {
+  const equalVote = readFileSync(new URL("../src/equal-vote.ts", import.meta.url), "utf8");
+  const channels = readFileSync(new URL("../src/chat-channels.ts", import.meta.url), "utf8");
+  assert.match(equalVote, /FIXED_TIE_RULE = "random_elimination"/);
+  assert.match(equalVote, /equalVoteTopTargets\(state\)/);
+  assert.match(equalVote, /randomEqualVoteTopTarget\(state\)/);
+  assert.match(equalVote, /areEqualVotesComplete\(state\)/);
+  assert.match(equalVote, /!player\.kickedAt/);
+  assert.match(channels, /installHouseRules\(GameRoomCtor\);\s*installEqualVoteRules\(GameRoomCtor\);\s*installAIFlowRules\(GameRoomCtor\);/s);
 });
 
 test("server translation endpoint is authenticated and uses Userscript-style Google GTX with no Cloud Translation key", () => {
