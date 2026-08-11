@@ -148,11 +148,23 @@ async function handleAdmin(request: Request, url: URL, env: WorkerEnv): Promise<
   const directory = roomDirectory(env);
 
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {
-    const [roomCount, errors] = await Promise.all([directory.roomCount(), directory.listErrors(20)]);
+    const now = Date.now();
+    const activeSince = now - 15 * 60_000;
+    const errorSince = now - 24 * 60 * 60_000;
+    const [roomCount, activeRoomCount, errorStats] = await Promise.all([
+      directory.roomCount(),
+      directory.roomCount("", "active", activeSince),
+      directory.errorStats(errorSince)
+    ]);
     return json({
       ok: true,
       roomCount,
-      recentErrors: errors,
+      activeRoomCount,
+      activeWindowMinutes: 15,
+      errorCount24h: errorStats.total,
+      errorRoomCount24h: errorStats.roomCount,
+      errorByCategory: errorStats.byCategory,
+      errorBySource: errorStats.bySource,
       translationConfigured: true,
       adminConfigured: true
     });
@@ -161,14 +173,37 @@ async function handleAdmin(request: Request, url: URL, env: WorkerEnv): Promise<
   if (request.method === "GET" && url.pathname === "/api/admin/rooms") {
     const limit = integerQuery(url, "limit", 100, 1, 250);
     const offset = integerQuery(url, "offset", 0, 0, 100_000);
-    const [rooms, total] = await Promise.all([directory.listRooms(limit, offset), directory.roomCount()]);
-    return json({ rooms, total, limit, offset });
+    const search = textQuery(url, "q", 40).toUpperCase();
+    const activity = roomActivityQuery(url.searchParams.get("activity"));
+    const activeWindowMinutes = integerQuery(url, "activeWindowMinutes", 15, 1, 1_440);
+    const activeSince = Date.now() - activeWindowMinutes * 60_000;
+    const [rooms, total] = await Promise.all([
+      directory.listRooms(limit, offset, search, activity, activeSince),
+      directory.roomCount(search, activity, activeSince)
+    ]);
+    return json({ rooms, total, limit, offset, search, activity, activeWindowMinutes });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/errors") {
     const limit = integerQuery(url, "limit", 100, 1, 250);
+    const offset = integerQuery(url, "offset", 0, 0, 100_000);
     const roomId = optionalRoomId(url.searchParams.get("roomId"));
-    return json({ errors: await directory.listErrors(limit, roomId) });
+    const category = labelQuery(url, "category");
+    const source = labelQuery(url, "source");
+    const search = textQuery(url, "q", 120);
+    const hours = integerQuery(url, "hours", 0, 0, 24 * 30);
+    const grouped = url.searchParams.get("grouped") === "1" || url.searchParams.get("grouped") === "true";
+    const result = await directory.queryErrors({
+      limit,
+      offset,
+      ...(roomId ? { roomId } : {}),
+      ...(category ? { category } : {}),
+      ...(source ? { source } : {}),
+      ...(search ? { search } : {}),
+      ...(hours > 0 ? { sinceAt: Date.now() - hours * 60 * 60_000 } : {}),
+      grouped
+    });
+    return json({ ...result, limit, offset, grouped });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/rooms/register") {
@@ -234,6 +269,9 @@ function extractRoomId(pathname: string): string | undefined { return pathname.m
 function optionalRoomId(value: string | null): string | undefined { if (!value) return undefined; const id = value.trim().toUpperCase(); if (!/^[A-Z2-9]{6}$/.test(id)) throw new Error("房號格式不正確"); return id; }
 function roomIdField(body: JsonObject, key: string): string { const id = stringField(body, key, 6).toUpperCase(); if (!/^[A-Z2-9]{6}$/.test(id)) throw new Error("房號格式不正確"); return id; }
 function integerQuery(url: URL, key: string, fallback: number, min: number, max: number): number { const raw = url.searchParams.get(key); if (!raw) return fallback; const value = Number.parseInt(raw, 10); return Number.isInteger(value) ? Math.max(min, Math.min(max, value)) : fallback; }
+function textQuery(url: URL, key: string, maxLength: number): string { return String(url.searchParams.get(key) || "").trim().slice(0, maxLength); }
+function labelQuery(url: URL, key: string): string | undefined { const value = textQuery(url, key, 60); if (!value) return undefined; if (!/^[a-z0-9_.:-]+$/i.test(value)) throw new Error(`${key} 格式不正確`); return value; }
+function roomActivityQuery(value: string | null): "all" | "active" | "stale" { return value === "active" || value === "stale" ? value : "all"; }
 
 function stringArrayField(body: JsonObject, key: string, maxItems: number, maxLength: number, legacy?: unknown): string[] {
   const raw = body[key] ?? (typeof legacy === "string" ? [legacy] : undefined);
