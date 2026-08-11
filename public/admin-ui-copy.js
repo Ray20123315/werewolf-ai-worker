@@ -8,19 +8,20 @@
     const value = localStorage.getItem("werewolf-locale");
     return value === "zh-CN" || value === "en" ? value : "zh-TW";
   };
+  function set(id, value) {
+    const element = document.querySelector(id);
+    if (element && element.textContent !== value) element.textContent = value;
+  }
   function apply() {
     const [admin, rooms, room, errors, help] = rows[locale()] || rows["zh-TW"];
-    const loginEyebrow = document.querySelector("#adminLogin .eyebrow");
-    const loginHelp = document.querySelector("#adminLogin > p");
-    if (loginEyebrow) loginEyebrow.textContent = admin;
-    if (loginHelp) loginHelp.textContent = help;
-    const wideEyebrows = [...document.querySelectorAll("#adminDashboard .admin-wide .eyebrow")];
-    if (wideEyebrows[0]) wideEyebrows[0].textContent = rooms;
-    if (wideEyebrows[1]) wideEyebrows[1].textContent = errors;
-    const sideEyebrow = document.querySelector("#adminDashboard .admin-side .eyebrow");
-    if (sideEyebrow) sideEyebrow.textContent = room;
+    set("#adminLoginEyebrow", admin);
+    set("#adminToolbarEyebrow", admin);
+    set("#adminRoomsEyebrow", rooms);
+    set("#adminRoomEyebrow", room);
+    set("#adminErrorsEyebrow", errors);
+    set("#adminTokenHelp", help);
   }
-  document.querySelector("#adminLanguage")?.addEventListener("change", () => setTimeout(apply, 0));
+  document.querySelector("#languageSelect")?.addEventListener("change", () => setTimeout(apply, 0));
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply, { once: true });
   else apply();
 })();
