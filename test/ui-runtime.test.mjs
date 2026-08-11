@@ -13,7 +13,9 @@ const publicScripts = [
   "../public/chat-channels.js",
   "../public/ai-form.js",
   "../public/house-rules.js",
-  "../public/admin.js"
+  "../public/room-toolkit.js",
+  "../public/admin.js",
+  "../public/admin-toolkit.js"
 ];
 
 function source(relative) {
@@ -29,7 +31,7 @@ test("browser JavaScript files pass syntax checks", () => {
 });
 
 test("no runtime helper replaces the game's native WebSocket constructor", () => {
-  for (const relative of ["../public/ui-fixes.js", "../public/chat-channels.js", "../public/ai-form.js", "../public/house-rules.js"]) {
+  for (const relative of ["../public/ui-fixes.js", "../public/chat-channels.js", "../public/ai-form.js", "../public/house-rules.js", "../public/room-toolkit.js"]) {
     const js = source(relative);
     assert.doesNotMatch(js, /window\.WebSocket\s*=/, relative);
     assert.doesNotMatch(js, /extends\s+NativeWebSocket/, relative);
@@ -70,7 +72,12 @@ test("AI bulk join keeps the page and form state while storing keys for every cr
   assert.match(html, /name="count"[^>]*min="1"[^>]*max="100"[^>]*value="1"/);
   assert.match(html, /id="aiNameBaseLabel"/);
   assert.match(html, /id="aiBatchHint"/);
-  assert.match(html, /<script src="\/ai-form\.js"><\/script>\s*<script src="\/house-rules\.js"><\/script>\s*<script type="module" src="\/app\.js"><\/script>/s);
+  const aiScript = html.indexOf('<script src="/ai-form.js"></script>');
+  const houseScript = html.indexOf('<script src="/house-rules.js"></script>');
+  const toolkitScript = html.indexOf('<script src="/room-toolkit.js"></script>');
+  const appScript = html.indexOf('<script type="module" src="/app.js"></script>');
+  assert.ok(aiScript >= 0 && aiScript < houseScript, "AI capture controller must load before house-rules");
+  assert.ok(houseScript < toolkitScript && toolkitScript < appScript, "room toolkit may extend the pre-app layer without moving AI capture behind app.js");
 
   assert.match(ai, /const BATCH_MAX = 100/);
   assert.match(ai, /Array\.from\(\{ length: count \}, \(_, index\) => normalizeName\(`\$\{base\}\$\{index \+ 1\}`\)\)/);
