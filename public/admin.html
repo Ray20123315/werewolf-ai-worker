@@ -12,7 +12,7 @@
 <body>
   <div class="site-bg"></div>
   <main class="shell admin-shell">
-    <header class="brandbar">
+    <header class="brandbar admin-brandbar">
       <a href="/" class="brand" aria-label="回首頁"><span><b>狼人殺</b></span></a>
       <div class="brand-actions">
         <select id="languageSelect" class="language-select" aria-label="語言">
@@ -35,35 +35,64 @@
 
     <section id="adminDashboard" class="admin-dashboard hidden">
       <div class="admin-toolbar">
-        <div><span class="eyebrow">ADMIN</span><h1>管理後台</h1></div>
-        <div class="admin-toolbar-actions"><button id="refreshAdmin" class="button button-secondary" type="button">重新整理</button><button id="logoutAdmin" class="button button-ghost" type="button">登出後台</button></div>
+        <div class="admin-title"><span class="eyebrow">ADMIN</span><h1>管理後台</h1><p>房間追蹤、即時診斷與管理操作集中在同一頁。</p></div>
+        <div class="admin-toolbar-actions">
+          <span id="adminLastUpdated" class="admin-updated">—</span>
+          <button id="refreshAdmin" class="button button-secondary" type="button">重新整理</button>
+          <button id="logoutAdmin" class="button button-ghost" type="button">登出後台</button>
+        </div>
       </div>
 
       <div class="admin-stats">
-        <article class="panel admin-stat"><span>已追蹤房間</span><strong id="adminRoomCount">0</strong></article>
-        <article class="panel admin-stat"><span>Google 翻譯</span><strong id="adminTranslationState">—</strong></article>
-        <article class="panel admin-stat"><span>最近錯誤</span><strong id="adminErrorCount">0</strong></article>
+        <article class="panel admin-stat"><span>已追蹤房間</span><strong id="adminRoomCount">0</strong><small>Room Directory</small></article>
+        <article class="panel admin-stat"><span>15 分鐘活躍</span><strong id="adminActiveRoomCount">0</strong><small>最近有 API / WS 活動</small></article>
+        <article class="panel admin-stat"><span>24 小時錯誤</span><strong id="adminErrorCount">0</strong><small id="adminErrorRoomCount">0 個房間受影響</small></article>
+        <article class="panel admin-stat"><span>Google 翻譯</span><strong id="adminTranslationState">—</strong><small>玩家聊天翻譯狀態</small></article>
       </div>
 
       <div class="admin-grid">
-        <section class="panel admin-wide">
-          <div class="section-heading compact-heading"><span class="eyebrow">ROOMS</span><h2>所有房間</h2></div>
-          <form id="registerRoomForm" class="admin-inline-form">
-            <label>註冊既有房間<input name="roomId" maxlength="6" placeholder="KTXPJ3" /></label>
-            <button class="button button-ghost" type="submit">加入追蹤</button>
-          </form>
-          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>房號</th><th>首次追蹤</th><th>最後活動</th><th></th></tr></thead><tbody id="adminRoomsBody"></tbody></table></div>
+        <section class="panel admin-wide admin-section">
+          <div class="section-heading compact-heading admin-section-title"><div><span class="eyebrow">ROOMS</span><h2>所有房間</h2></div><span id="adminRoomsResultCount" class="admin-result-count">—</span></div>
+          <div class="admin-room-tools">
+            <form id="registerRoomForm" class="admin-inline-form">
+              <label>註冊既有房間<input name="roomId" maxlength="6" placeholder="KTXPJ3" /></label>
+              <button class="button button-ghost" type="submit">加入追蹤</button>
+            </form>
+            <div class="admin-filter-grid admin-room-filter-grid">
+              <label>搜尋房號<input id="adminRoomSearch" type="search" maxlength="40" placeholder="輸入房號" /></label>
+              <label>活動狀態<select id="adminRoomActivity"><option value="all">全部</option><option value="active">15 分鐘內活躍</option><option value="stale">15 分鐘以上未活動</option></select></label>
+            </div>
+          </div>
+          <div class="admin-table-wrap admin-rooms-wrap">
+            <table class="admin-table admin-rooms-table"><thead><tr><th>房號</th><th>狀態</th><th>首次追蹤</th><th>最後活動</th><th>操作</th></tr></thead><tbody id="adminRoomsBody"></tbody></table>
+          </div>
         </section>
 
-        <section class="panel admin-side">
-          <div class="section-heading compact-heading"><span class="eyebrow">ROOM</span><h2>房間詳情</h2></div>
+        <section class="panel admin-side admin-section">
+          <div class="section-heading compact-heading admin-section-title"><div><span class="eyebrow">ROOM</span><h2>房間詳情</h2></div></div>
           <div id="adminRoomDetail" class="admin-empty">選擇一個房間查看。</div>
         </section>
       </div>
 
-      <section class="panel">
-        <div class="section-heading compact-heading"><span class="eyebrow">ERRORS</span><h2>最近錯誤</h2></div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>時間</th><th>房號</th><th>錯誤分類</th><th>來源</th><th>訊息</th></tr></thead><tbody id="adminErrorsBody"></tbody></table></div>
+      <section class="panel admin-section admin-errors-section">
+        <div class="section-heading compact-heading admin-section-title"><div><span class="eyebrow">ERRORS</span><h2>錯誤診斷</h2></div><span id="adminErrorsResultCount" class="admin-result-count">—</span></div>
+        <form id="adminErrorFilters" class="admin-filter-grid admin-error-filter-grid">
+          <label>關鍵字<input id="adminErrorSearch" type="search" maxlength="120" placeholder="訊息 / detail / 房號" /></label>
+          <label>房號<input id="adminErrorRoom" maxlength="6" placeholder="全部房間" /></label>
+          <label>錯誤分類<select id="adminErrorCategory"><option value="">全部分類</option></select></label>
+          <label>來源<select id="adminErrorSource"><option value="">全部來源</option></select></label>
+          <label>時間範圍<select id="adminErrorHours"><option value="24">最近 24 小時</option><option value="6">最近 6 小時</option><option value="72">最近 3 天</option><option value="0">全部紀錄</option></select></label>
+          <label>顯示方式<select id="adminErrorGrouped"><option value="1">合併重複錯誤</option><option value="0">逐筆顯示</option></select></label>
+        </form>
+        <div class="admin-error-summary" id="adminErrorSummary"></div>
+        <div class="admin-table-wrap admin-errors-wrap">
+          <table class="admin-table admin-errors-table"><thead><tr><th>最近發生</th><th>房號</th><th>分類</th><th>來源</th><th>次數</th><th>訊息</th></tr></thead><tbody id="adminErrorsBody"></tbody></table>
+        </div>
+        <div class="admin-pager">
+          <button id="adminErrorsPrev" class="button button-ghost compact" type="button">上一頁</button>
+          <span id="adminErrorsPage">—</span>
+          <button id="adminErrorsNext" class="button button-ghost compact" type="button">下一頁</button>
+        </div>
       </section>
     </section>
   </main>
