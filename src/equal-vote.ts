@@ -71,13 +71,15 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
 
   proto.requireState = function (): GameState {
     const state = originalRequireState.call(this) as GameState;
-    state.settings.tieRule = FIXED_TIE_RULE;
+    if (state?.settings) state.settings.tieRule = FIXED_TIE_RULE;
     return state;
   };
 
-  proto.configureSettings = function (token: string, raw: Record<string, unknown>): void {
-    return originalConfigureSettings.call(this, token, { ...raw, tieRule: FIXED_TIE_RULE });
-  };
+  if (typeof originalConfigureSettings === "function") {
+    proto.configureSettings = function (token: string, raw: Record<string, unknown>): void {
+      return originalConfigureSettings.call(this, token, { ...raw, tieRule: FIXED_TIE_RULE });
+    };
+  }
 
   proto.castVoteById = function (state: GameState, voterId: string, targetId: string): void {
     if (state.phase !== "vote") throw new Error("目前不是放逐投票階段");
@@ -184,21 +186,23 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
     };
   }
 
-  proto.projectState = function (state: GameState, token: string): any {
-    state.settings.tieRule = FIXED_TIE_RULE;
-    const view = originalProjectState.call(this, state, token);
-    if (view?.settings) view.settings.tieRule = FIXED_TIE_RULE;
-    const me = this.playerByToken(state, token) as Player;
-    if (me.role === "precog" && state.phase === "vote") {
-      const top = equalVoteTopTargets(state);
-      view.me.roleResults = { ...(view.me.roleResults ?? {}) };
-      if (top.length === 1) {
-        const player = state.players.find((item) => item.id === top[0]);
-        view.me.roleResults["precog:top"] = player?.role ? `目前唯一最高票 ${player.name}：${roleDefinition(player.role).name}` : "目前最高票尚未唯一確定";
-      } else view.me.roleResults["precog:top"] = "目前最高票尚未唯一確定";
-    }
-    return view;
-  };
+  if (typeof originalProjectState === "function") {
+    proto.projectState = function (state: GameState, token: string): any {
+      if (state?.settings) state.settings.tieRule = FIXED_TIE_RULE;
+      const view = originalProjectState.call(this, state, token);
+      if (view?.settings) view.settings.tieRule = FIXED_TIE_RULE;
+      const me = this.playerByToken(state, token) as Player;
+      if (me.role === "precog" && state.phase === "vote") {
+        const top = equalVoteTopTargets(state);
+        view.me.roleResults = { ...(view.me.roleResults ?? {}) };
+        if (top.length === 1) {
+          const player = state.players.find((item) => item.id === top[0]);
+          view.me.roleResults["precog:top"] = player?.role ? `目前唯一最高票 ${player.name}：${roleDefinition(player.role).name}` : "目前最高票尚未唯一確定";
+        } else view.me.roleResults["precog:top"] = "目前最高票尚未唯一確定";
+      }
+      return view;
+    };
+  }
 }
 
 function clearLegacyVoteFlow(room: any, state: GameState): void {
