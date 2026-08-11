@@ -24,8 +24,8 @@
     </header>
 
     <section id="adminLogin" class="admin-login panel">
-      <div class="section-heading"><span class="eyebrow">ADMIN</span><h1>後台登入</h1></div>
-      <p>Token 只保留在這個瀏覽器 session，不會寫入房間或網址。</p>
+      <div class="section-heading"><span id="adminLoginEyebrow" class="eyebrow">ADMIN</span><h1>後台登入</h1></div>
+      <p id="adminTokenHelp">Token 只保留在這個瀏覽器 session，不會寫入房間或網址。</p>
       <form id="adminLoginForm" class="stack-form">
         <label>管理員 Token<input name="token" type="password" autocomplete="current-password" required /></label>
         <button class="button button-primary full" type="submit">登入後台</button>
@@ -34,7 +34,7 @@
 
     <section id="adminDashboard" class="admin-dashboard hidden">
       <div class="admin-toolbar">
-        <div><span class="eyebrow">ADMIN</span><h1>管理後台</h1></div>
+        <div><span id="adminToolbarEyebrow" class="eyebrow">ADMIN</span><h1>管理後台</h1></div>
         <div class="admin-toolbar-actions"><button id="refreshAdmin" class="button button-secondary" type="button">重新整理</button><button id="logoutAdmin" class="button button-ghost" type="button">登出後台</button></div>
       </div>
 
@@ -46,7 +46,7 @@
 
       <div class="admin-grid">
         <section class="panel admin-wide">
-          <div class="section-heading compact-heading"><span class="eyebrow">ROOMS</span><h2>所有房間</h2></div>
+          <div class="section-heading compact-heading"><span id="adminRoomsEyebrow" class="eyebrow">ROOMS</span><h2>所有房間</h2></div>
           <form id="registerRoomForm" class="admin-inline-form">
             <label>註冊既有房間<input name="roomId" maxlength="6" placeholder="KTXPJ3" /></label>
             <button class="button button-ghost" type="submit">加入追蹤</button>
@@ -55,18 +55,19 @@
         </section>
 
         <section class="panel admin-side">
-          <div class="section-heading compact-heading"><span class="eyebrow">ROOM</span><h2>房間詳情</h2></div>
+          <div class="section-heading compact-heading"><span id="adminRoomEyebrow" class="eyebrow">ROOM</span><h2>房間詳情</h2></div>
           <div id="adminRoomDetail" class="admin-empty">選擇一個房間查看。</div>
         </section>
       </div>
 
       <section class="panel">
-        <div class="section-heading compact-heading"><span class="eyebrow">ERRORS</span><h2>最近錯誤</h2></div>
+        <div class="section-heading compact-heading"><span id="adminErrorsEyebrow" class="eyebrow">ERRORS</span><h2>最近錯誤</h2></div>
         <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>時間</th><th>房號</th><th>錯誤分類</th><th>來源</th><th>訊息</th></tr></thead><tbody id="adminErrorsBody"></tbody></table></div>
       </section>
     </section>
   </main>
   <div id="adminToast" class="toast hidden" role="status"></div>
+  <script src="/admin-ui-copy.js"></script>
   <script type="module" src="/admin.js"></script>
 </body>
 </html>
