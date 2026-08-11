@@ -1,4 +1,5 @@
 import { areNightActionsComplete, livingPlayers, playerFaction, secureShuffle, validateRoleSetup } from "./game-engine.js";
+import { roleDefinition } from "./roles.js";
 import type { GameState, Player, RoleSetup } from "./types.js";
 
 type RoomPrototype = Record<string, any> & { __addonIdentitiesInstalled?: boolean };
@@ -16,6 +17,7 @@ export function installAddonIdentityRules(GameRoomCtor: { prototype: RoomPrototy
   const proto = GameRoomCtor.prototype;
   if (proto.__addonIdentitiesInstalled) return;
   proto.__addonIdentitiesInstalled = true;
+  describeConfiguredAddons();
 
   const originalRequireState = proto.requireState;
   const originalStartGame = proto.startGame;
@@ -38,6 +40,8 @@ export function installAddonIdentityRules(GameRoomCtor: { prototype: RoomPrototy
 
   proto.startGame = function (token: string): void {
     const state = this.requireState() as GameState;
+    this.assertHost(state, token);
+    this.assertLobby(state);
     if (state.settings.autoRoleSetup) return originalStartGame.call(this, token);
 
     const configuredSetup = { ...state.roleSetup } as RoleSetup;
@@ -50,17 +54,18 @@ export function installAddonIdentityRules(GameRoomCtor: { prototype: RoomPrototy
     const baseError = validateRoleSetup(baseSetup, participants.length);
     if (baseError) throw new Error(baseError.replace("角色總數", "本體角色總數"));
 
+    assignConfiguredAddons(state, masochistCount, sadistCount);
     state.roleSetup = baseSetup;
     try {
       originalStartGame.call(this, token);
     } catch (error) {
       state.roleSetup = configuredSetup;
+      for (const player of state.players as AddonPlayer[]) player.addonRoles = addonList(player).filter((addon) => addon === LOVER);
       throw error;
     }
 
     const started = this.requireState() as GameState;
     started.roleSetup = configuredSetup;
-    assignConfiguredAddons(started, masochistCount, sadistCount);
     this.touchAndSave(started);
     this.broadcast(started);
   };
@@ -111,6 +116,13 @@ export function installAddonIdentityRules(GameRoomCtor: { prototype: RoomPrototy
         delete view.roleSetupError;
         view.canStart = true;
       }
+      const masochists = addonCount(state.roleSetup, MASOCHIST);
+      const sadists = addonCount(state.roleSetup, SADIST);
+      try { validateAddonSetup(state, masochists, sadists); }
+      catch (error) {
+        view.roleSetupError = error instanceof Error ? error.message : String(error);
+        view.canStart = false;
+      }
     }
 
     const addonActions = availableAddonActions(this, state, me);
@@ -155,7 +167,6 @@ export function installAddonIdentityRules(GameRoomCtor: { prototype: RoomPrototy
       afterAddonNightSubmission(this, state);
       return { ok: true };
     }
-    // 抖S查抖M沒有可由公開資訊合理推理的線索；AI 用安全隨機避免浪費 token。
     const target = secureShuffle(candidates)[0]!;
     submitSadistProbe(this, state, actor, target.id);
     return { ok: true };
@@ -207,6 +218,7 @@ export function installAddonIdentityRules(GameRoomCtor: { prototype: RoomPrototy
 
   proto.endGame = function (state: GameState, winner: any): void {
     migrateLegacyAddonState(this, state);
+    if (state.winner) return;
     if (state.winnerPlayerIds?.length || state.winnerLabel) return originalEndGame.call(this, state, winner);
 
     const loverPair = soleLivingLoverPair(state);
@@ -225,6 +237,7 @@ export function installAddonIdentityRules(GameRoomCtor: { prototype: RoomPrototy
   };
 
   proto.checkAndMaybeEnd = function (state: GameState): void {
+    if (state.winner) return;
     const result = originalCheckAndMaybeEnd.call(this, state);
     if (!state.winner) delete (this.systemMem(state) as Record<string, unknown>).addonBlockedFactionWinner;
     return result;
@@ -254,22 +267,20 @@ function formalPlayers(state: GameState): AddonPlayer[] {
 function validateAddonSetup(state: GameState, masochists: number, sadists: number): void {
   const total = formalPlayers(state).length;
   if (masochists > total || sadists > total) throw new Error("附加身份數量不能超過正式玩家數");
+  if (masochists + sadists > total) throw new Error("抖M與抖S必須附加在不同玩家身上，合計不能超過正式玩家數");
   if (sadists > 0 && masochists === 0) throw new Error("啟用抖S時至少需要 1 名抖M");
 }
 
 function assignConfiguredAddons(state: GameState, masochistCount: number, sadistCount: number): void {
   const players = formalPlayers(state);
-  for (const player of players) {
-    player.addonRoles = addonList(player).filter((addon) => addon === LOVER);
-  }
+  for (const player of players) player.addonRoles = addonList(player).filter((addon) => addon === LOVER);
 
   const shuffled = secureShuffle(players);
-  const masochists = shuffled.slice(0, Math.min(masochistCount, shuffled.length));
+  const masochists = shuffled.slice(0, masochistCount);
   for (const player of masochists) addAddon(player, MASOCHIST);
 
-  const preferredSadists = secureShuffle(players.filter((player) => !hasAddon(player, MASOCHIST)));
-  const fallbackSadists = secureShuffle(players.filter((player) => hasAddon(player, MASOCHIST)));
-  for (const player of [...preferredSadists, ...fallbackSadists].slice(0, Math.min(sadistCount, players.length))) addAddon(player, SADIST);
+  const sadistPool = secureShuffle(players.filter((player) => !hasAddon(player, MASOCHIST)));
+  for (const player of sadistPool.slice(0, sadistCount)) addAddon(player, SADIST);
 }
 
 function migrateLegacyAddonState(room: any, state: GameState): void {
@@ -318,7 +329,7 @@ function availableAddonActions(room: any, state: GameState, actor: AddonPlayer):
   return [{
     addon: SADIST,
     effect: "probe_masochist",
-    label: "抖S教主",
+    label: "抖S",
     description: "附加身份：每晚可查驗一名尚未查過的存活玩家是否為抖M；查中後該抖M成為你的死亡肉盾。",
     candidateIds: candidates.map((player) => player.id)
   }];
@@ -416,7 +427,8 @@ function reciprocalLoverPairs(state: GameState): [AddonPlayer, AddonPlayer][] {
     if (!player.alive || player.isSpectator || !hasAddon(player, LOVER) || typeof player.loverId !== "string" || seen.has(player.id)) continue;
     const lover = state.players.find((item) => item.id === player.loverId && item.alive && !item.isSpectator) as AddonPlayer | undefined;
     if (!lover || lover.loverId !== player.id || !hasAddon(lover, LOVER)) continue;
-    seen.add(player.id); seen.add(lover.id);
+    seen.add(player.id);
+    seen.add(lover.id);
     pairs.push([player, lover]);
   }
   return pairs;
@@ -434,4 +446,15 @@ function mixedLivingLoversBlockFactionWin(state: GameState): boolean {
     const right = playerFaction(b);
     return Boolean(left && right && left !== right);
   });
+}
+
+function describeConfiguredAddons(): void {
+  const masochist = roleDefinition(MASOCHIST);
+  masochist.summary = "附加身份：保留本體角色與陣營；一般放逐票仍為 1 票。若自己被一般放逐處決，立即達成個人特殊勝利。";
+  masochist.passives = ["addon_identity", "wins_if_exiled"];
+  delete masochist.action;
+  const sadist = roleDefinition(SADIST);
+  sadist.summary = "附加身份：保留本體角色與陣營。每晚查驗一名玩家是否為抖M；查中後該抖M成為死亡肉盾，但放逐與情侶殉情不轉移。";
+  sadist.passives = ["addon_identity", "finds_masochist_bodyguard"];
+  delete sadist.action;
 }
