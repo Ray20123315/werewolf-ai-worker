@@ -1,6 +1,8 @@
 (() => {
   const COLLAPSE_PREFIX = "werewolf-panel-collapsed:";
   const ROLE_GROUP_PREFIX = "werewolf-role-group-collapsed:";
+  const ROLE_DIALOG_ID = "roleSetupDialog";
+  const ROLE_LAUNCHER_ID = "roleSetupLauncher";
   const nativeFetch = window.fetch.bind(window);
   const staticI18n = () => window.WerewolfGameI18n;
   const staticSources = new WeakMap();
@@ -9,9 +11,54 @@
   let dialogObserver = null;
 
   const LABELS = {
-    "zh-TW": { collapse: "縮起", expand: "展開" },
-    "zh-CN": { collapse: "收起", expand: "展開" },
-    en: { collapse: "Collapse", expand: "Expand" }
+    "zh-TW": {
+      collapse: "縮起",
+      expand: "展開",
+      configureRoles: "角色配置",
+      close: "關閉",
+      addonIdentities: "附加身份",
+      lover: "情侶",
+      masochist: "抖M",
+      sadist: "抖S",
+      loverSummary: "由邱比特配對產生；保留本體角色與陣營，不佔本體角色配置數量。",
+      lobby: "大廳",
+      reaction: "反應",
+      gameOver: "遊戲結束",
+      vote: "投票",
+      waitingRoleSetup: "等待房主完成角色配置。"
+    },
+    "zh-CN": {
+      collapse: "收起",
+      expand: "展开",
+      configureRoles: "角色配置",
+      close: "关闭",
+      addonIdentities: "附加身份",
+      lover: "情侣",
+      masochist: "抖M",
+      sadist: "抖S",
+      loverSummary: "由丘比特配对产生；保留本体角色与阵营，不占本体角色配置数量。",
+      lobby: "大厅",
+      reaction: "反应",
+      gameOver: "游戏结束",
+      vote: "投票",
+      waitingRoleSetup: "等待房主完成角色配置。"
+    },
+    en: {
+      collapse: "Collapse",
+      expand: "Expand",
+      configureRoles: "Role setup",
+      close: "Close",
+      addonIdentities: "Addon identities",
+      lover: "Lover",
+      masochist: "M",
+      sadist: "S",
+      loverSummary: "Created by Cupid pairing; keeps the base role and faction and does not consume a base-role slot.",
+      lobby: "LOBBY",
+      reaction: "REACTION",
+      gameOver: "GAME OVER",
+      vote: "VOTE",
+      waitingRoleSetup: "Waiting for the host to finish role setup."
+    }
   };
 
   function locale() {
@@ -94,6 +141,30 @@
     }
   }
 
+  function translateRuntimeFixedText(source, targetLocale) {
+    const dictionary = LABELS[targetLocale] || LABELS["zh-TW"];
+    if (source === "LOBBY") return dictionary.lobby;
+    if (source === "REACTION") return dictionary.reaction;
+    if (source === "GAME OVER") return dictionary.gameOver;
+    if (source === "VOTE") return dictionary.vote;
+    if (source === "等待房主完成角色配置。") return dictionary.waitingRoleSetup;
+    const lobbySummary = source.match(/^正式玩家 (\d+) 人；角色總數必須相同，且狼人陣營少於其他玩家總數。AI 不是必需品。$/);
+    if (lobbySummary) {
+      const count = lobbySummary[1];
+      if (targetLocale === "en") return `${count} active player${count === "1" ? "" : "s"}. Base-role total must match the active-player count, and werewolves must be fewer than all other players combined. AI is optional.`;
+      if (targetLocale === "zh-CN") return `正式玩家 ${count} 人；本体角色总数必须与正式玩家数相同，且狼人阵营少于其他玩家总数。AI 不是必需。`;
+      return `正式玩家 ${count} 人；本體角色總數必須與正式玩家數相同，且狼人陣營少於其他玩家總數。AI 不是必需品。`;
+    }
+    const round = source.match(/^第 (\d+) 輪$/);
+    if (round && targetLocale === "en") return `Round ${round[1]}`;
+    const formal = source.match(/^(\d+) 名正式玩家$/);
+    if (formal) {
+      if (targetLocale === "en") return `${formal[1]} active player${formal[1] === "1" ? "" : "s"}`;
+      if (targetLocale === "zh-CN") return `${formal[1]} 名正式玩家`;
+    }
+    return null;
+  }
+
   function translateFixedGameDom() {
     const targetLocale = locale();
     const fixed = staticI18n();
@@ -107,11 +178,12 @@
       if (!current) continue;
       let source = staticSources.get(node);
       if (!source) {
-        if (!fixed.canTranslate(current)) continue;
+        const runtime = translateRuntimeFixedText(current, targetLocale);
+        if (!runtime && !fixed.canTranslate(current)) continue;
         source = current;
         staticSources.set(node, source);
       }
-      const translated = fixed.text(source, targetLocale);
+      const translated = translateRuntimeFixedText(source, targetLocale) || fixed.text(source, targetLocale);
       const original = node.nodeValue || "";
       const trimmed = original.trim();
       const start = original.indexOf(trimmed);
@@ -190,7 +262,7 @@
 
   function installRoleGroupCollapse() {
     for (const group of document.querySelectorAll("#roleCatalog .role-group")) {
-      const faction = group.dataset.roleGroup || "unknown";
+      const faction = group.dataset.roleGroup || group.dataset.addonRoleGroup || "unknown";
       const head = group.querySelector(":scope > .role-group-head");
       if (!head || head.dataset.uiCollapseReady === "1") continue;
       head.dataset.uiCollapseReady = "1";
@@ -215,12 +287,93 @@
     }
   }
 
+  function syncRoleLauncher() {
+    const launcher = document.querySelector(`#${ROLE_LAUNCHER_ID}`);
+    const count = document.querySelector("#roleSetupTotal");
+    const mirror = launcher?.querySelector("[data-role-launcher-count]");
+    const title = launcher?.querySelector("[data-role-launcher-title]");
+    const dialogTitle = document.querySelector(`#${ROLE_DIALOG_ID} [data-role-dialog-title]`);
+    if (title) title.textContent = label("configureRoles");
+    if (dialogTitle) dialogTitle.textContent = label("configureRoles");
+    if (mirror) mirror.textContent = count?.textContent || "0 / 0";
+    const close = document.querySelector(`#${ROLE_DIALOG_ID} [data-role-dialog-close]`);
+    if (close) {
+      close.textContent = "×";
+      close.title = label("close");
+      close.setAttribute("aria-label", label("close"));
+    }
+    const host = document.querySelector("#hostPanel");
+    const dialog = document.querySelector(`#${ROLE_DIALOG_ID}`);
+    if (host?.classList.contains("hidden") && dialog?.open) dialog.close();
+  }
+
+  function syncAddonIdentityStrip() {
+    const strip = document.querySelector("[data-addon-identity-strip]");
+    if (!strip) return;
+    const title = strip.querySelector("[data-addon-strip-title]");
+    const lover = strip.querySelector("[data-addon-lover]");
+    const m = strip.querySelector("[data-addon-m]");
+    const s = strip.querySelector("[data-addon-s]");
+    const summary = strip.querySelector("[data-addon-lover-summary]");
+    if (title) title.textContent = label("addonIdentities");
+    if (lover) lover.textContent = label("lover");
+    if (m) m.textContent = label("masochist");
+    if (s) s.textContent = label("sadist");
+    if (summary) summary.textContent = label("loverSummary");
+  }
+
+  function installRoleSetupModal() {
+    const form = document.querySelector("#roleSetupForm");
+    const details = form?.closest("details");
+    if (!form || !details) return;
+    let dialog = document.querySelector(`#${ROLE_DIALOG_ID}`);
+    let launcher = document.querySelector(`#${ROLE_LAUNCHER_ID}`);
+    if (!dialog) {
+      launcher = document.createElement("button");
+      launcher.id = ROLE_LAUNCHER_ID;
+      launcher.type = "button";
+      launcher.className = "role-modal-launcher";
+      launcher.innerHTML = '<span data-role-launcher-title></span><strong data-role-launcher-count>0 / 0</strong><span aria-hidden="true">›</span>';
+      details.before(launcher);
+
+      dialog = document.createElement("dialog");
+      dialog.id = ROLE_DIALOG_ID;
+      dialog.className = "role-setup-dialog";
+      dialog.innerHTML = '<section class="role-setup-dialog-card"><header class="role-setup-dialog-head"><div><span class="eyebrow">ROLE SETUP</span><h2 data-role-dialog-title></h2></div><button class="role-dialog-close" data-role-dialog-close type="button">×</button></header><div class="addon-identity-strip" data-addon-identity-strip data-no-translate><div class="addon-identity-strip-head"><strong data-addon-strip-title></strong><span class="pill addon" data-addon-lover></span><span class="pill addon" data-addon-m></span><span class="pill addon" data-addon-s></span></div><p data-addon-lover-summary></p></div><div class="role-setup-dialog-body" data-role-dialog-body></div></section>';
+      document.body.append(dialog);
+      const body = dialog.querySelector("[data-role-dialog-body]");
+      const summary = details.querySelector(":scope > summary");
+      let node = summary?.nextSibling || details.firstChild;
+      while (node) {
+        const next = node.nextSibling;
+        body.append(node);
+        node = next;
+      }
+      details.classList.add("role-setup-source-hidden");
+      launcher.addEventListener("click", () => {
+        if (typeof dialog.showModal === "function") dialog.showModal();
+        else dialog.setAttribute("open", "");
+        document.querySelector("#roleSearch")?.focus();
+      });
+      dialog.querySelector("[data-role-dialog-close]")?.addEventListener("click", () => dialog.close());
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      dialog.addEventListener("cancel", () => dialog.close());
+    }
+    syncRoleLauncher();
+    syncAddonIdentityStrip();
+  }
+
   function applyUiFixes() {
     installPanelCollapse();
+    installRoleSetupModal();
     installRoleGroupCollapse();
     translateRoleCatalog();
     translateFixedGameDom();
     translateFixedMessages();
+    syncRoleLauncher();
+    syncAddonIdentityStrip();
   }
 
   function observeRuntime() {
