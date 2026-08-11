@@ -8,6 +8,7 @@
   <meta name="description" content="Cloudflare Workers 辯論式狼人殺：持久人物登入、完整角色庫、自由聊天、BYOK AI。" />
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/ui-fixes.css" />
+  <link rel="stylesheet" href="/compact-ui.css" />
 </head>
 <body>
   <div class="site-bg"></div>
@@ -125,10 +126,10 @@
               </form>
             </details>
 
-            <details open>
+            <details id="roleSetupDetails">
               <summary>角色配置 <span id="roleSetupTotal" class="summary-count">0 / 0</span></summary>
               <label class="check-row role-auto-row"><input id="autoRoleSetup" type="checkbox" /><span>自動配置角色（依正式玩家數）</span></label>
-              <p class="field-help">勾選後由伺服器依目前正式玩家數自動配置基本板子；取消後可手動調整 114 個角色。</p>
+              <p class="field-help">勾選後由伺服器依目前正式玩家數自動配置基本板子；取消後可手動調整本體角色與附加身份。</p>
               <div class="role-tools"><input id="roleSearch" placeholder="搜尋角色、陣營或技能……" /><button id="zeroRoles" class="icon-button" type="button">全部歸零</button></div>
               <form id="roleSetupForm">
                 <div id="roleCatalog" class="role-catalog"></div>
@@ -174,10 +175,12 @@
   <div id="toast" class="toast hidden" role="status"></div>
   <script src="/chat-channels.js"></script>
   <script src="/game-i18n.js"></script>
+  <script src="/static-copy.js"></script>
   <script src="/role-name-i18n.js"></script>
   <script src="/ui-fixes.js"></script>
   <script src="/ai-form.js"></script>
   <script src="/house-rules.js"></script>
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/compact-ui.js"></script>
 </body>
 </html>
