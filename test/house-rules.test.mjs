@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { checkWinner } from "../.test-build/game-engine.js";
 import { installHouseRules } from "../.test-build/house-rules.js";
+import { installInspectionRules } from "../.test-build/inspection-rules.js";
 
 function player(id, role, alive = true) {
   return { id, token: `t-${id}`, name: id, nameKey: id, alive, isAI: false, isSpectator: false, role, joinedAt: 0 };
@@ -160,6 +161,87 @@ test("legacy single-witch rooms preserve an already consumed potion during migra
   assert.equal(state.roleMemory.w1.witchHealUsed, true);
   assert.equal(view.me.witchHealAvailable, false);
   assert.equal(view.me.witchPoisonAvailable, true);
+});
+
+test("true-role inspection ignores disguise but still respects an explicit hidden result", () => {
+  class FakeInspectionRoom {
+    mem(state, id) { state.roleMemory[id] ??= {}; return state.roleMemory[id]; }
+    storeRoleResult(state, actor, target, result) {
+      state.roleResults[actor.id] ??= {};
+      const memory = this.mem(state, target.id);
+      if (memory.inspectionHiddenRound === state.round) state.roleResults[actor.id][target.id] = "被隱藏";
+      else if (typeof memory.disguiseTarget === "string") state.roleResults[actor.id][target.id] = `FAKE:${memory.disguiseTarget}`;
+      else state.roleResults[actor.id][target.id] = result;
+    }
+  }
+  installInspectionRules(FakeInspectionRoom);
+  const actor = player("diviner", "diviner");
+  const target = player("target", "werewolf");
+  const fake = player("fake", "villager");
+  const state = multiWitchState();
+  state.players = [actor, target, fake];
+  state.roleResults = {};
+  state.roleMemory = { target: { disguiseTarget: "fake" } };
+  state.round = 2;
+  const room = new FakeInspectionRoom();
+
+  room.storeRoleResult(state, actor, target, "werewolf");
+  assert.equal(state.roleResults.diviner.target, "werewolf", "true-role check must not be replaced by disguise");
+
+  state.roleMemory.target.inspectionHiddenRound = 2;
+  room.storeRoleResult(state, actor, target, "werewolf");
+  assert.equal(state.roleResults.diviner.target, "被隱藏", "explicit identity hiding still wins for the current round");
+});
+
+test("non-identity private intelligence is not rewritten by target disguise", () => {
+  class FakeInspectionRoom {
+    mem(state, id) { state.roleMemory[id] ??= {}; return state.roleMemory[id]; }
+    storeRoleResult(state, actor, target, result) {
+      state.roleResults[actor.id] ??= {};
+      const memory = this.mem(state, target.id);
+      state.roleResults[actor.id][target.id] = typeof memory.disguiseTarget === "string" ? "BROKEN-DISGUISE-RESULT" : result;
+    }
+  }
+  installInspectionRules(FakeInspectionRoom);
+  const target = player("target", "werewolf");
+  const state = multiWitchState();
+  state.players = [target];
+  state.roleResults = {};
+  state.roleMemory = { target: { disguiseTarget: "fake" } };
+  const room = new FakeInspectionRoom();
+
+  for (const [role, result] of [
+    ["detective", "wolf_kill"],
+    ["spy", "無主動技能"],
+    ["poltergeist", "觀察到：wolf_kill"],
+    ["medicine_wolf", "本晚狼刀目標 target 被解藥救下"],
+    ["gravekeeper", "上一夜狼刀死者職業：狼人"],
+    ["medium", "被放逐者陣營：狼人陣營"],
+    ["witness", "狼人擊殺者線索：wolf"]
+  ]) {
+    const actor = player(`actor-${role}`, role);
+    room.storeRoleResult(state, actor, target, result);
+    assert.equal(state.roleResults[actor.id].target, result, `${role} information should stay event/action intelligence`);
+  }
+});
+
+test("ambiguous identity checks keep the legacy disguise path until their rules are explicitly defined", () => {
+  class FakeInspectionRoom {
+    mem(state, id) { state.roleMemory[id] ??= {}; return state.roleMemory[id]; }
+    storeRoleResult(state, actor, target, result) {
+      state.roleResults[actor.id] ??= {};
+      const memory = this.mem(state, target.id);
+      state.roleResults[actor.id][target.id] = typeof memory.disguiseTarget === "string" ? "LEGACY-DISGUISE" : result;
+    }
+  }
+  installInspectionRules(FakeInspectionRoom);
+  const state = multiWitchState();
+  const target = player("target", "werewolf");
+  state.roleResults = {};
+  state.roleMemory = { target: { disguiseTarget: "fake" } };
+  const room = new FakeInspectionRoom();
+  room.storeRoleResult(state, player("priest", "priest"), target, "不是吸血狼");
+  assert.equal(state.roleResults.priest.target, "LEGACY-DISGUISE");
 });
 
 test("AI autonomy has hard conversation caps and never chains from AI chat", () => {
