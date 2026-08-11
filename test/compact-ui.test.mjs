@@ -30,7 +30,8 @@ test("role configuration is moved into a compact modal without replacing the exi
   assert.match(js, /body\.append\(child\)/);
   assert.match(js, /dialog\.showModal\(\)/);
   assert.match(js, /#roleSetupForm/);
-  assert.doesNotMatch(js, /innerHTML\s*=.*roleSetupForm/s);
+  assert.doesNotMatch(js, /cloneNode\s*\(/);
+  assert.doesNotMatch(js, /roleSetupForm[^\n]*\.innerHTML\s*=/);
 
   assert.match(css, /\.role-setup-dialog\s*\{/);
   assert.match(css, /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
@@ -56,6 +57,7 @@ test("remaining fixed labels use repository-owned static translations", () => {
     assert.equal(fixed.includes(`"${token}"`), true, `missing fixed translation for ${token}`);
   }
   assert.match(fixed, /Token 只保留在這個瀏覽器 session/);
+  assert.match(fixed, /正式玩家 \(\\d\+\) 人/);
   assert.match(fixed, /"zh-TW"/);
   assert.match(fixed, /"zh-CN"/);
   assert.match(fixed, /en:/);
