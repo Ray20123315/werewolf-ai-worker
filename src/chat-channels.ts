@@ -1,5 +1,6 @@
 import { installAIFlowRules } from "./ai-flow.js";
 import { installAISanityRules } from "./ai-sanity.js";
+import { installAddonIdentityRules } from "./addon-identities.js";
 import { installEqualVoteRules } from "./equal-vote.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
@@ -68,6 +69,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   installEqualVoteRules(GameRoomCtor);
   installAIFlowRules(GameRoomCtor);
   installAISanityRules(GameRoomCtor);
+  installAddonIdentityRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
