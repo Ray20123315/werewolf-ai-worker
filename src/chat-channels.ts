@@ -22,7 +22,10 @@ type RoomPrototype = Record<string, any> & { __chatChannelsInstalled?: boolean }
 export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }): void {
   const proto = GameRoomCtor.prototype;
   if (proto.__chatChannelsInstalled) return;
-  const unsupported = unsupportedWordRoleIds(ROLE_IDS);
+  // Gold Water is a user-explicit product removal. Keep its legacy type id only
+  // for old-room migration; it must not participate in the canonical source guard.
+  const canonicalRoleIds = ROLE_IDS.filter((id) => id !== "confirmed_villager");
+  const unsupported = unsupportedWordRoleIds(canonicalRoleIds);
   if (unsupported.length) throw new Error(`角色不在酷米家族 Word 白名單：${unsupported.join(", ")}`);
   proto.__chatChannelsInstalled = true;
 
