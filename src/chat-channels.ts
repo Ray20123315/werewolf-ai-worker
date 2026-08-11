@@ -1,4 +1,5 @@
 import { installAIFlowRules } from "./ai-flow.js";
+import { installEqualVoteRules } from "./equal-vote.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
 import type { ChatMessage, GameState, Player } from "./types.js";
@@ -63,6 +64,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   };
 
   installHouseRules(GameRoomCtor);
+  installEqualVoteRules(GameRoomCtor);
   installAIFlowRules(GameRoomCtor);
 }
 

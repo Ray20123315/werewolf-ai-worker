@@ -102,7 +102,7 @@ test("AI bulk form owns fixed zh-TW, zh-CN, and en labels", () => {
   assert.match(ai, /languageSelect/);
 });
 
-test("house-rule client defaults to DeepSeek, auto-runs BYOK tasks, and supports split sheriff ballots", () => {
+test("house-rule client defaults to DeepSeek and exposes only one equal exile vote", () => {
   const house = source("../public/house-rules.js");
   const html = source("../public/index.html");
 
@@ -112,8 +112,12 @@ test("house-rule client defaults to DeepSeek, auto-runs BYOK tasks, and supports
   assert.match(house, /model\.value = "deepseek-v4-flash"/);
   assert.match(house, /aiTimer = setTimeout\(\(\) => runPendingAI\(signature, keys\), 650\)/);
   assert.match(house, /lastFailedAt < 8000/);
-  assert.match(house, /id = "sheriffVoteTarget2"/);
-  assert.match(house, /targetId: `\$\{first\}\|\$\{second\}`/);
+  assert.match(html, /id="tieRuleSelect"[\s\S]*value="random_elimination"/);
+  assert.match(html, /所有存活、未被踢出的正式玩家一人一票；全部投完立即結算。/);
+  assert.match(house, /removeLegacySheriffSecondVoteUi/);
+  assert.match(house, /一般放逐投票與其他玩家相同，都是 1 票/);
+  assert.doesNotMatch(house, /second\.innerHTML = first\.innerHTML/);
+  assert.doesNotMatch(house, /targetId: `\$\{first\}\|\$\{second\}`/);
   assert.match(house, /slaughter_edge/);
   assert.match(house, /slaughter_all/);
 });
