@@ -57,3 +57,71 @@ test("admin UI remains compact and responsive instead of forcing wide tables", (
   assert.match(js, /navigator\.clipboard\.writeText/);
   assert.match(js, /ERROR_PAGE_SIZE/);
 });
+
+test("admin async form lifecycle fix keeps a stable form reference across await", () => {
+  const html = readFileSync(new URL("../public/admin.html", import.meta.url), "utf8");
+  const toolkit = readFileSync(new URL("../public/admin-toolkit.js", import.meta.url), "utf8");
+  execFileSync(process.execPath, ["--check", new URL("../public/admin-toolkit.js", import.meta.url).pathname]);
+
+  assert.match(html, /admin-toolkit\.js/);
+  assert.match(html, /admin-toolkit\.css/);
+  assert.match(toolkit, /formElement\.id !== "registerRoomForm" && formElement\.id !== "adminNoticeForm"/);
+  assert.match(toolkit, /event\.stopImmediatePropagation\(\)/);
+  assert.match(toolkit, /await adminRequest\("\/api\/admin\/rooms\/register"/);
+  assert.match(toolkit, /await adminRequest\(`\/api\/admin\/rooms\/\$\{roomId\}\/notice`/);
+  assert.equal((toolkit.match(/formElement\.reset\(\)/g) || []).length, 2);
+  assert.doesNotMatch(toolkit, /event\.currentTarget\.reset\(\)/);
+});
+
+test("room frontend toolkit provides at least ten useful room functions", () => {
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const toolkit = readFileSync(new URL("../public/room-toolkit.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../public/room-toolkit.css", import.meta.url), "utf8");
+  execFileSync(process.execPath, ["--check", new URL("../public/room-toolkit.js", import.meta.url).pathname]);
+
+  assert.match(html, /room-toolkit\.css/);
+  assert.match(html, /room-toolkit\.js/);
+  const capabilities = [
+    "roomPlayerSearch",
+    "roomPlayerFilter",
+    "roomPlayerSort",
+    "roomPlayerClear",
+    "roomMessageSearch",
+    "roomMessageFilter",
+    "roomJumpLatest",
+    "roomCopyCode",
+    "roomShare",
+    "roomCompactToggle",
+    "roomConnectionCheck",
+    "roomFormalCount",
+    "roomAliveCount",
+    "roomAICount",
+    "roomSpectatorCount",
+    "roomLastSync"
+  ];
+  for (const capability of capabilities) assert.match(toolkit, new RegExp(capability));
+  assert.ok(capabilities.length >= 10);
+  assert.match(toolkit, /navigator\.share/);
+  assert.match(toolkit, /MutationObserver/);
+  assert.match(css, /room-compact-mode/);
+  assert.match(css, /@media \(max-width: 680px\)/);
+});
+
+test("backend diagnostics return actionable activity severity signature and burst metadata", () => {
+  const directorySource = readFileSync(new URL("../src/room-directory.ts", import.meta.url), "utf8");
+  for (const field of ["activityAgeMs", "trackedForMs", "activityState", "severity", "signature", "durationMs", "burst"]) {
+    assert.match(directorySource, new RegExp(field));
+  }
+  assert.match(directorySource, /diagnosticSeverity/);
+  assert.match(directorySource, /diagnosticSignature/);
+  assert.match(directorySource, /count >= 5 && durationMs <= 5 \* 60_000/);
+});
+
+test("admin diagnostic toolkit supports reset copy export auto-refresh and backend metadata decoration", () => {
+  const toolkit = readFileSync(new URL("../public/admin-toolkit.js", import.meta.url), "utf8");
+  for (const capability of ["adminResetFilters", "adminCopyDiagnostics", "adminExportDiagnostics", "adminAutoRefresh", "severity-", "signature", "burst"]) {
+    assert.match(toolkit, new RegExp(capability));
+  }
+  assert.match(toolkit, /JSON\.stringify\(payload, null, 2\)/);
+  assert.match(toolkit, /setInterval\(\(\) => document\.querySelector\("#refreshAdmin"\)/);
+});
