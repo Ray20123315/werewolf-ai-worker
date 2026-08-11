@@ -5,6 +5,7 @@
 .room-toolkit-count { grid-column: 1 / -1; color: var(--muted); font-size: 10px; line-height: 1.2; }
 .room-toolkit-hidden { display: none !important; }
 .room-has-unread { border-color: #b96c64 !important; color: var(--accent) !important; background: #fff7f5 !important; }
+.player-row:has(.role-reveal) .pill.private-inspection { display: none !important; }
 
 .room-quick-tools { display: grid; grid-template-columns: repeat(4, minmax(70px, .55fr)) minmax(170px, 1.25fr) auto; gap: 0; align-items: stretch; overflow: hidden; box-shadow: none; }
 .room-toolkit-stat, .room-toolkit-sync, .room-toolkit-actions { min-width: 0; padding: 11px 13px; border-right: 1px solid var(--line); }
