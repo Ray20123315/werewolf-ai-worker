@@ -68,15 +68,17 @@ test("page exposes three-language UI, automatic role setup, multi-key AI BYOK, a
   assert.doesNotMatch(app, /\bconfirm\s*\(/);
 });
 
-test("equal exile vote runtime is server-authoritative and always resolves a highest-count tie randomly", () => {
+test("equal exile vote runtime freezes the vote snapshot before effects and only randomizes tied-highest targets", () => {
   const equalVote = readFileSync(new URL("../src/equal-vote.ts", import.meta.url), "utf8");
   const channels = readFileSync(new URL("../src/chat-channels.ts", import.meta.url), "utf8");
   assert.match(equalVote, /FIXED_TIE_RULE = "random_elimination"/);
-  assert.match(equalVote, /equalVoteTopTargets\(state\)/);
-  assert.match(equalVote, /randomEqualVoteTopTarget\(state\)/);
+  assert.match(equalVote, /const snapshot = createVoteSnapshot\(state\)/);
+  assert.match(equalVote, /const topTargets = snapshot\.topTargetIds/);
+  assert.match(equalVote, /secureShuffle\(topTargets\)\[0\]/);
   assert.match(equalVote, /areEqualVotesComplete\(state\)/);
   assert.match(equalVote, /!player\.kickedAt/);
   assert.match(channels, /installHouseRules\(GameRoomCtor\);\s*installEqualVoteRules\(GameRoomCtor\);\s*installAIFlowRules\(GameRoomCtor\);/s);
+  assert.match(channels, /installCoreRules\(GameRoomCtor\);/);
 });
 
 test("server translation endpoint is authenticated and uses Userscript-style Google GTX with no Cloud Translation key", () => {

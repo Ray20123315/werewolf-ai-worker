@@ -1,6 +1,7 @@
 import { installAIFlowRules } from "./ai-flow.js";
 import { installAISanityRules } from "./ai-sanity.js";
 import { installAddonIdentityRules } from "./addon-identities.js";
+import { installCoreRules } from "./core-rules.js";
 import { installEqualVoteRules } from "./equal-vote.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
@@ -21,7 +22,10 @@ type RoomPrototype = Record<string, any> & { __chatChannelsInstalled?: boolean }
 export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }): void {
   const proto = GameRoomCtor.prototype;
   if (proto.__chatChannelsInstalled) return;
-  const unsupported = unsupportedWordRoleIds(ROLE_IDS);
+  // Gold Water is a user-explicit product removal. Keep its legacy type id only
+  // for old-room migration; it must not participate in the canonical source guard.
+  const canonicalRoleIds = ROLE_IDS.filter((id) => id !== "confirmed_villager");
+  const unsupported = unsupportedWordRoleIds(canonicalRoleIds);
   if (unsupported.length) throw new Error(`角色不在酷米家族 Word 白名單：${unsupported.join(", ")}`);
   proto.__chatChannelsInstalled = true;
 
@@ -86,6 +90,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   installOfficialSourceRules(GameRoomCtor);
   installInspectionRules(GameRoomCtor);
   installRelationshipRules(GameRoomCtor);
+  installCoreRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
@@ -100,11 +105,7 @@ function sendSecretChat(this: any, token: string, content: string, channel: Chat
       : [];
   if (audienceIds.length < 2) throw new Error(channel === "werewolf" ? "你目前沒有可用的狼人秘密聊天室" : "你目前沒有可用的情侶秘密聊天室");
 
-  const message = this.chatMessage(
-    state,
-    actor,
-    this.normalizeChat(content)
-  ) as RuntimeMessage;
+  const message = this.chatMessage(state, actor, this.normalizeChat(content)) as RuntimeMessage;
   message.channel = channel;
   message.audienceIds = audienceIds;
   state.messages.push(message);

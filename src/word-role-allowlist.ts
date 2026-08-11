@@ -5,6 +5,9 @@ import type { Role } from "./types.js";
  * 酷米家族.docx. Entries may come from the author's main/update posts or from
  * community role proposals preserved inside that Word file. Source tier is
  * still carried separately by each RoleDefinition.
+ *
+ * User-explicit product removals override the source document. Gold Water /
+ * confirmed_villager is intentionally not in this allowlist.
  */
 export const WORD_ROLE_IDS: readonly Role[] = [
   "werewolf",
@@ -70,7 +73,6 @@ export const WORD_ROLE_IDS: readonly Role[] = [
   "sniper",
   "scout",
   "verifier",
-  "confirmed_villager",
   "scapegoater",
   "witness",
   "traitor_wolf",
