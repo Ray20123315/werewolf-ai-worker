@@ -1,0 +1,12 @@
+.admin-toolkit-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: -2px 0 10px; }
+.admin-toolkit-actions .button { min-height: 34px; padding: 0 10px; font-size: .72rem; }
+.admin-diagnostic-meta { display: block; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(35,29,24,.12); font: 700 .64rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.admin-diagnostic-meta.severity-critical { color: var(--danger); }
+.admin-diagnostic-meta.severity-error { color: var(--accent); }
+.admin-diagnostic-meta.severity-warning { color: var(--warning); }
+.admin-diagnostic-meta.severity-info { color: var(--muted); }
+@media (max-width: 680px) {
+  .admin-toolkit-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .admin-toolkit-actions .button { width: 100%; min-width: 0; }
+}
+@media (max-width: 420px) { .admin-toolkit-actions { grid-template-columns: 1fr; } }
