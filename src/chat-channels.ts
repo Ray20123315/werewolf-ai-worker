@@ -4,6 +4,7 @@ import { installAddonIdentityRules } from "./addon-identities.js";
 import { installEqualVoteRules } from "./equal-vote.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
+import { installInspectionRules } from "./inspection-rules.js";
 import { installOfficialSourceRules } from "./source-rules.js";
 import type { ChatMessage, GameState, Player } from "./types.js";
 
@@ -72,6 +73,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   installAISanityRules(GameRoomCtor);
   installAddonIdentityRules(GameRoomCtor);
   installOfficialSourceRules(GameRoomCtor);
+  installInspectionRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {

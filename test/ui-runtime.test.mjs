@@ -148,3 +148,27 @@ test("fixed game translation stays local while player chat keeps the native remo
   assert.match(ui, /return nativeFetch\(input, init\)/);
   assert.match(ui, /fixed\.text\(source, targetLocale\)/);
 });
+
+test("private inspection results render beside players without widening the public projection", () => {
+  const toolkit = source("../public/room-toolkit.js");
+  const room = source("../src/room.ts");
+  const channels = source("../src/chat-channels.ts");
+
+  assert.match(toolkit, /function refreshPrivateInspections\(\)/);
+  assert.match(toolkit, /\/state\?token=\$\{encodeURIComponent\(session\.token\)\}/);
+  assert.match(toolkit, /inspectionView\?\.me\?\.seerResults\?\.\[player\.id\]/);
+  assert.match(toolkit, /inspectionView\?\.me\?\.roleResults \|\| \{\}/);
+  assert.match(toolkit, /pill private-inspection/);
+  assert.match(toolkit, /function factionInspectionLabel/);
+  assert.match(toolkit, /function identityResultLabel/);
+  assert.match(toolkit, /"zh-TW"/);
+  assert.match(toolkit, /"zh-CN"/);
+  assert.match(toolkit, /en:/);
+  assert.doesNotMatch(toolkit, /window\.WebSocket\s*=/);
+
+  assert.match(room, /const seerResults = state\.seerResults\[me\.id\]/);
+  assert.match(room, /state\.roleResults\[me\.id\]/);
+  assert.match(room, /state\.phase === "ended" && p\.role/);
+  assert.doesNotMatch(room, /seerResults:\s*state\.seerResults(?!\[me\.id\])/);
+  assert.match(channels, /installInspectionRules\(GameRoomCtor\)/);
+});
