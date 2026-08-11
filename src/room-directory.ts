@@ -107,7 +107,7 @@ export class RoomDirectory extends DurableObject<Env> {
   }
 
   async listErrors(limit = 100, roomId?: string): Promise<DirectoryErrorEntry[]> {
-    return (await this.queryErrors({ limit, roomId })).errors;
+    return (await this.queryErrors({ limit, ...(roomId ? { roomId } : {}) })).errors;
   }
 
   async queryErrors(query: DirectoryErrorQuery = {}): Promise<{ errors: DirectoryErrorEntry[]; total: number }> {
