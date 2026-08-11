@@ -1,6 +1,7 @@
 import { installAIFlowRules } from "./ai-flow.js";
 import { installAISanityRules } from "./ai-sanity.js";
 import { installAddonIdentityRules } from "./addon-identities.js";
+import { installCoreRules } from "./core-rules.js";
 import { installEqualVoteRules } from "./equal-vote.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
@@ -86,6 +87,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   installOfficialSourceRules(GameRoomCtor);
   installInspectionRules(GameRoomCtor);
   installRelationshipRules(GameRoomCtor);
+  installCoreRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
@@ -100,11 +102,7 @@ function sendSecretChat(this: any, token: string, content: string, channel: Chat
       : [];
   if (audienceIds.length < 2) throw new Error(channel === "werewolf" ? "你目前沒有可用的狼人秘密聊天室" : "你目前沒有可用的情侶秘密聊天室");
 
-  const message = this.chatMessage(
-    state,
-    actor,
-    this.normalizeChat(content)
-  ) as RuntimeMessage;
+  const message = this.chatMessage(state, actor, this.normalizeChat(content)) as RuntimeMessage;
   message.channel = channel;
   message.audienceIds = audienceIds;
   state.messages.push(message);
