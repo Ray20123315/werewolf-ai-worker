@@ -1,1 +1,22 @@
-PLACEHOLDER
+import { installCorePhaseAIRules } from "./core-phase-ai.js";
+import { installCoreRelationshipRules } from "./core-relationships.js";
+import { installCoreStateRules } from "./core-state.js";
+
+export {
+  CORE_REMOVED_ROLE_IDS,
+  DEFAULT_PHASE_SECONDS,
+  FOOL_CHANCE,
+  activeCoreRoleDefinitions,
+  coreWinner,
+  defaultAllRoleSetup,
+  exactDuplicateCoreSkills
+} from "./core-state.js";
+
+export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> & { __coreRulesInstalled?: boolean } }): void {
+  const proto = GameRoomCtor.prototype;
+  if (proto.__coreRulesInstalled) return;
+  proto.__coreRulesInstalled = true;
+  installCoreStateRules(GameRoomCtor);
+  installCoreRelationshipRules(GameRoomCtor);
+  installCorePhaseAIRules(GameRoomCtor);
+}
