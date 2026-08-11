@@ -1,5 +1,6 @@
 import { roleActionPrompt } from "./game-engine.js";
-import { formalLiving, RuntimeSettings } from "./core-state.js";
+import { formalLiving } from "./core-state.js";
+import type { RuntimeSettings } from "./core-state.js";
 import type { ChatMessage, GameState, Player, RoleActionSubmission } from "./types.js";
 
 type RoomPrototype = Record<string, any> & { __coreRelationshipRulesInstalled?: boolean };
@@ -18,11 +19,13 @@ export function installCoreRelationshipRules(GameRoomCtor: { prototype: RoomProt
   const originalProjectState = proto.projectState;
   const originalHandleClientMessage = proto.handleClientMessage;
 
-  proto.requireState = function (): GameState {
-    const state = originalRequireState.call(this) as GameState;
-    if (state?.roleMemory && Array.isArray(state.players)) migrateLegacyLoverPairs(this, state);
-    return state;
-  };
+  if (typeof originalRequireState === "function") {
+    proto.requireState = function (): GameState {
+      const state = originalRequireState.call(this) as GameState;
+      if (state?.roleMemory && Array.isArray(state.players)) migrateLegacyLoverPairs(this, state);
+      return state;
+    };
+  }
 
   if (typeof originalSubmitRoleActionInternal === "function") {
     proto.submitRoleActionInternal = function (state: GameState, actor: Player, effect: string, targetIds: string[], option?: string): void {
@@ -40,8 +43,8 @@ export function installCoreRelationshipRules(GameRoomCtor: { prototype: RoomProt
       if (unique.some((id) => !legal.has(id))) throw new Error("邱比特配對目標無效");
       if (unique.some((id) => loverGroupMembers(state, id).length > 0)) throw new Error("同一名玩家不能同時加入兩組 CP");
       state.nightActions.roleActions[actor.id] = { effect: "link_lovers", targetIds: unique, submittedAt: Date.now() } as RoleActionSubmission;
-      this.mem(state, actor.id).cupidLinkedIds = unique;
-      this.mem(state, actor.id)["used:link_lovers"] = true;
+      roomMem(this, state, actor.id).cupidLinkedIds = unique;
+      roomMem(this, state, actor.id)["used:link_lovers"] = true;
     };
   }
 
@@ -59,7 +62,7 @@ export function installCoreRelationshipRules(GameRoomCtor: { prototype: RoomProt
       const members = loverGroupMembers(state, targetId);
       const killed = originalKillPlayer.call(this, state, targetId, reason, killerId, bypassProtection) as boolean;
       if (!killed || !groupId || members.length < 2) return killed;
-      const system = this.systemMem(state) as Record<string, unknown>;
+      const system = roomSystemMem(this, state);
       if (system.activeLoverCascadeGroup === groupId) return killed;
       system.activeLoverCascadeGroup = groupId;
       try {
@@ -85,7 +88,7 @@ export function installCoreRelationshipRules(GameRoomCtor: { prototype: RoomProt
         view.me.loverGroupIds = group;
         if (livingLoverAudience(state, me).length >= 2) view.chatChannels = Array.from(new Set([...(view.chatChannels ?? ["public"]), "lovers"]));
       }
-      const linked = this.mem(state, me.id).cupidLinkedIds;
+      const linked = roomMem(this, state, me.id).cupidLinkedIds;
       if (me.role === "cupid" && Array.isArray(linked)) view.me.cupidLinkedIds = [...linked];
       return view;
     };
@@ -132,7 +135,7 @@ function createLoverGroup(room: any, state: GameState, cupid: Player, rawMembers
   if (members.length !== expected) return;
   const groupId = `cp:${state.round}:${cupid.id}:${crypto.randomUUID()}`;
   for (const memberId of members) {
-    const memory = room.mem(state, memberId) as Record<string, unknown>;
+    const memory = roomMem(room, state, memberId);
     memory.loverGroupId = groupId;
     memory.loverGroupMembers = [...members];
     const player = state.players.find((item) => item.id === memberId) as RuntimePlayer | undefined;
@@ -142,20 +145,20 @@ function createLoverGroup(room: any, state: GameState, cupid: Player, rawMembers
       player.addonRoles = addons;
     }
   }
-  room.mem(state, cupid.id).cupidLinkedIds = [...members];
+  roomMem(room, state, cupid.id).cupidLinkedIds = [...members];
   state.roleResults[cupid.id] ??= {};
   state.roleResults[cupid.id]!["cupid:group"] = `已配對：${members.map((id) => state.players.find((player) => player.id === id)?.name ?? id).join("、")}`;
 }
 
 function migrateLegacyLoverPairs(room: any, state: GameState): void {
   for (const player of state.players) {
-    const memory = room.mem(state, player.id) as Record<string, unknown>;
+    const memory = roomMem(room, state, player.id);
     if (typeof memory.loverGroupId === "string") continue;
     const loverId = memory.lover;
     if (typeof loverId !== "string") continue;
     const other = state.players.find((candidate) => candidate.id === loverId);
     if (!other) continue;
-    const otherMemory = room.mem(state, other.id) as Record<string, unknown>;
+    const otherMemory = roomMem(room, state, other.id);
     if (otherMemory.lover !== player.id) continue;
     const members = [player.id, other.id].sort();
     const groupId = `legacy:${members.join(":")}`;
@@ -180,4 +183,15 @@ function sendLoverGroupChat(room: any, state: GameState, actor: Player, raw: str
   state.messages.push(message);
   room.trimMessages(state);
   room.saveBroadcast(state);
+}
+
+function roomMem(room: any, state: GameState, playerId: string): Record<string, any> {
+  if (typeof room?.mem === "function") return room.mem(state, playerId) as Record<string, any>;
+  state.roleMemory[playerId] ??= {};
+  return state.roleMemory[playerId] as Record<string, any>;
+}
+
+function roomSystemMem(room: any, state: GameState): Record<string, any> {
+  if (typeof room?.systemMem === "function") return room.systemMem(state) as Record<string, any>;
+  return roomMem(room, state, "__system");
 }
