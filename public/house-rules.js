@@ -8,8 +8,10 @@
       edge: "屠邊：民邊或神邊任一邊全滅",
       all: "屠城：所有非狼人對手全滅",
       winHelp: "屠邊較快：初始存在的村民邊或神職邊任一邊被清空，狼人即勝。屠城較嚴格：所有非狼人對手都必須出局。",
-      sheriffHelp: "警長有 2 張放逐票，可投同一人，也可拆投給不同玩家。",
-      sheriffSecond: "警長第 2 張放逐票",
+      sheriffHelp: "警長選舉保留；一般放逐投票與其他玩家相同，都是 1 票。",
+      tieLabel: "放逐平票",
+      tieFixed: "最高票並列時隨機抽 1 人",
+      tieHelp: "所有存活、未被踢出的正式玩家一人一票；全部投完立即結算。",
       aiRunning: "AI 正在自動執行",
       wolfLeader: "本夜狼刀主控"
     },
@@ -18,8 +20,10 @@
       edge: "屠边：民边或神边任一边全灭",
       all: "屠城：所有非狼人对手全灭",
       winHelp: "屠边较快：初始存在的村民边或神职边任一边被清空，狼人即胜。屠城较严格：所有非狼人对手都必须出局。",
-      sheriffHelp: "警长有 2 张放逐票，可投同一人，也可拆投给不同玩家。",
-      sheriffSecond: "警长第 2 张放逐票",
+      sheriffHelp: "警长选举保留；普通放逐投票与其他玩家相同，都是 1 票。",
+      tieLabel: "放逐平票",
+      tieFixed: "最高票并列时随机抽 1 人",
+      tieHelp: "所有存活、未被踢出的正式玩家一人一票；全部投完立即结算。",
       aiRunning: "AI 正在自动执行",
       wolfLeader: "本夜狼刀主控"
     },
@@ -28,8 +32,10 @@
       edge: "Edge elimination: wipe civilians or gods",
       all: "Full elimination: wipe every non-werewolf opponent",
       winHelp: "Edge elimination is faster: wolves win when an initially present civilian or god edge is wiped out. Full elimination requires every non-werewolf opponent to be eliminated.",
-      sheriffHelp: "The sheriff has 2 exile ballots. They may target the same player or be split between two players.",
-      sheriffSecond: "Sheriff ballot 2",
+      sheriffHelp: "Sheriff election stays enabled, but the sheriff has the same single exile vote as every other player.",
+      tieLabel: "Exile tie",
+      tieFixed: "Randomly eliminate 1 tied top player",
+      tieHelp: "Each living, non-kicked active player has exactly one equal vote; settlement starts as soon as everyone has voted.",
       aiRunning: "AI action running automatically",
       wolfLeader: "Wolf kill leader tonight"
     }
@@ -87,6 +93,11 @@
     if (button) button.remove();
   }
 
+  function removeLegacySheriffSecondVoteUi() {
+    document.querySelector("#sheriffVoteTarget2Label")?.remove();
+    document.querySelector("#sheriffVoteTarget2")?.remove();
+  }
+
   function applyDeepSeekDefault() {
     const provider = document.querySelector("#aiProvider");
     const model = document.querySelector("#aiModel");
@@ -97,11 +108,25 @@
     document.querySelector("#aiBaseUrlRow")?.classList.add("hidden");
   }
 
+  function ensureEqualVoteCopy() {
+    const label = document.querySelector("#tieRuleLabel");
+    const select = document.querySelector("#tieRuleSelect");
+    const help = document.querySelector("#equalVoteHelp");
+    if (label && label.textContent !== text("tieLabel")) label.textContent = text("tieLabel");
+    if (select?.options?.[0] && select.options[0].textContent !== text("tieFixed")) select.options[0].textContent = text("tieFixed");
+    if (select) {
+      if (select.value !== "random_elimination") select.value = "random_elimination";
+      if (!select.disabled) select.disabled = true;
+    }
+    if (help && help.textContent !== text("tieHelp")) help.textContent = text("tieHelp");
+    removeLegacySheriffSecondVoteUi();
+  }
+
   function ensureWinConditionControl() {
     const form = document.querySelector("#settingsForm");
     if (!form) return;
     const sheriffToggle = form.querySelector('input[name="sheriffEnabled"]');
-    const sheriffHelp = sheriffToggle?.closest("label")?.nextElementSibling;
+    const sheriffHelp = document.querySelector("#sheriffVoteHelp") || sheriffToggle?.closest("label")?.nextElementSibling;
     if (sheriffHelp?.classList.contains("field-help") && sheriffHelp.textContent !== text("sheriffHelp")) {
       sheriffHelp.textContent = text("sheriffHelp");
       sheriffHelp.setAttribute("data-no-translate", "");
@@ -139,6 +164,7 @@
       const disabled = latestState ? latestState.phase !== "lobby" || !latestState.me?.isHost : false;
       if (select.disabled !== disabled) select.disabled = disabled;
     }
+    ensureEqualVoteCopy();
   }
 
   function sendCommand(command) {
@@ -161,7 +187,6 @@
         if (payload.type !== "state" || !payload.state) return;
         latestState = payload.state;
         ensureWinConditionControl();
-        syncSheriffVoteUi();
         syncWolfLeaderHint();
         suppressManualAIApproval();
         scheduleAI();
@@ -215,33 +240,6 @@
     }
   }
 
-  function isMeSheriff() {
-    if (!latestState?.me?.id) return false;
-    return latestState.players?.some((player) => player.id === latestState.me.id && player.isSheriff);
-  }
-
-  function syncSheriffVoteUi() {
-    const first = document.querySelector("#voteTarget");
-    const button = document.querySelector("#voteButton");
-    if (!first || !button || latestState?.phase !== "vote" || !isMeSheriff() || (latestState.votesCast || []).includes(latestState.me.id)) return;
-    let second = document.querySelector("#sheriffVoteTarget2");
-    if (!second) {
-      const label = document.createElement("label");
-      label.id = "sheriffVoteTarget2Label";
-      label.dataset.noTranslate = "";
-      const span = document.createElement("span");
-      span.textContent = text("sheriffSecond");
-      second = document.createElement("select");
-      second.id = "sheriffVoteTarget2";
-      second.innerHTML = first.innerHTML;
-      label.append(span, second);
-      button.parentElement?.insertBefore(label, button);
-    } else {
-      const label = document.querySelector("#sheriffVoteTarget2Label > span");
-      if (label && label.textContent !== text("sheriffSecond")) label.textContent = text("sheriffSecond");
-    }
-  }
-
   function syncWolfLeaderHint() {
     let hint = document.querySelector("#wolfLeaderHint");
     const leaderId = latestState?.phase === "night" ? latestState.me?.wolfLeaderId : undefined;
@@ -271,18 +269,6 @@
     if (name && name.textContent !== leader.name) name.textContent = leader.name;
   }
 
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest?.("#voteButton");
-    if (!button || latestState?.phase !== "vote" || !isMeSheriff()) return;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    const first = document.querySelector("#voteTarget")?.value;
-    const second = document.querySelector("#sheriffVoteTarget2")?.value || first;
-    if (!first || !second) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    sendCommand({ type: "vote", targetId: `${first}|${second}` });
-  }, true);
-
   document.querySelector("#settingsForm")?.addEventListener("submit", () => {
     const select = document.querySelector("#winConditionSelect");
     if (select && latestState?.phase === "lobby" && latestState.me?.isHost) {
@@ -292,13 +278,12 @@
 
   document.querySelector("#languageSelect")?.addEventListener("change", () => setTimeout(() => {
     ensureWinConditionControl();
-    syncSheriffVoteUi();
     syncWolfLeaderHint();
   }, 0));
 
   const actionArea = document.querySelector("#actionArea");
   if (actionArea) new MutationObserver(() => {
-    syncSheriffVoteUi();
+    removeLegacySheriffSecondVoteUi();
     syncWolfLeaderHint();
   }).observe(actionArea, { childList: true, subtree: true });
 
@@ -310,5 +295,6 @@
   applyDeepSeekDefault();
   ensureWinConditionControl();
   suppressManualAIApproval();
+  removeLegacySheriffSecondVoteUi();
   connect();
 })();
