@@ -1,8 +1,8 @@
 (() => {
   const LABELS = {
-    "zh-TW": { public: "公開", werewolf: "狼人", lovers: "情侶", channel: "聊天頻道", secret: "秘密聊天", publicBlocked: "夜晚公開聊天暫停", available: "可聊天", reconnecting: "秘密聊天重新連線中" },
-    "zh-CN": { public: "公开", werewolf: "狼人", lovers: "情侣", channel: "聊天频道", secret: "秘密聊天", publicBlocked: "夜晚公开聊天暂停", available: "可聊天", reconnecting: "秘密聊天重新连接中" },
-    en: { public: "Public", werewolf: "Werewolf", lovers: "Lovers", channel: "Chat channel", secret: "Secret chat", publicBlocked: "Public chat is paused at night", available: "Chat available", reconnecting: "Secret chat reconnecting" }
+    "zh-TW": { public: "公開", werewolf: "狼人", lovers: "情侶", channel: "聊天頻道", secret: "秘密聊天", publicBlocked: "夜晚公開聊天暫停", available: "可聊天", reconnecting: "秘密聊天重新連線中", lover: "戀人", cupidPair: "邱比特配對", yourLover: "你的戀人", paired: "已配對" },
+    "zh-CN": { public: "公开", werewolf: "狼人", lovers: "情侣", channel: "聊天频道", secret: "秘密聊天", publicBlocked: "夜晚公开聊天暂停", available: "可聊天", reconnecting: "秘密聊天重新连接中", lover: "恋人", cupidPair: "丘比特配对", yourLover: "你的恋人", paired: "已配对" },
+    en: { public: "Public", werewolf: "Werewolf", lovers: "Lovers", channel: "Chat channel", secret: "Secret chat", publicBlocked: "Public chat is paused at night", available: "Chat available", reconnecting: "Secret chat reconnecting", lover: "Lover", cupidPair: "Cupid pair", yourLover: "Your lover", paired: "Linked" }
   };
 
   let latestState = null;
@@ -103,6 +103,53 @@
     });
   }
 
+  function decorateRelationships() {
+    document.querySelectorAll("[data-private-relationship]").forEach((node) => node.remove());
+    document.querySelector("#privateRelationshipNotice")?.remove();
+    if (!latestState?.me || !Array.isArray(latestState.players)) return;
+
+    const playerById = new Map(latestState.players.map((player) => [player.id, player]));
+    const rowsByName = new Map([...document.querySelectorAll("#players > .player-row")].map((row) => [String(row.querySelector(".player-name strong")?.textContent || "").trim(), row]));
+    const notices = [];
+
+    const addBadge = (playerId, label, kind) => {
+      const player = playerById.get(playerId);
+      const row = player ? rowsByName.get(String(player.name || "")) : null;
+      const nameBox = row?.querySelector(".player-name");
+      if (!nameBox || nameBox.querySelector(`[data-private-relationship='${kind}']`)) return;
+      const badge = document.createElement("span");
+      badge.className = `pill private-relationship ${kind}`;
+      badge.dataset.privateRelationship = kind;
+      badge.dataset.noTranslate = "";
+      badge.textContent = label;
+      nameBox.append(badge);
+    };
+
+    const lover = playerById.get(latestState.me.loverId);
+    if (lover) {
+      addBadge(lover.id, text("lover"), "lover-private");
+      notices.push(`${text("yourLover")}：${lover.name}`);
+    }
+
+    const cupidIds = Array.isArray(latestState.me.cupidLinkedIds) ? [...new Set(latestState.me.cupidLinkedIds)] : [];
+    const cupidPair = cupidIds.map((id) => playerById.get(id)).filter(Boolean);
+    if (cupidPair.length === 2) {
+      cupidPair.forEach((player) => addBadge(player.id, text("paired"), "cupid-private"));
+      notices.push(`${text("cupidPair")}：${cupidPair[0].name} × ${cupidPair[1].name}`);
+    }
+
+    if (!notices.length) return;
+    const playersBox = document.querySelector("#players");
+    if (!playersBox) return;
+    const notice = document.createElement("div");
+    notice.id = "privateRelationshipNotice";
+    notice.className = "private-relationship-notice";
+    notice.dataset.privateRelationship = "notice";
+    notice.dataset.noTranslate = "";
+    notice.textContent = notices.join("　｜　");
+    playersBox.before(notice);
+  }
+
   function applyState(state) {
     latestState = state;
     lastChannels = Array.isArray(state?.chatChannels) && state.chatChannels.length ? state.chatChannels : ["public"];
@@ -110,6 +157,7 @@
       ensureSelector();
       syncChatAvailability();
       decorateMessages();
+      decorateRelationships();
     };
     setTimeout(apply, 0);
     setTimeout(apply, 75);
@@ -190,6 +238,7 @@
       if (select) renderOptions(select);
       syncChatAvailability();
       decorateMessages();
+      decorateRelationships();
     }, 0);
   });
 
