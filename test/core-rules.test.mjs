@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { CORE_REMOVED_ROLE_IDS, coreWinner, defaultAllRoleSetup, exactDuplicateCoreSkills, installCoreRules } from "../.test-build/core-rules.js";
+import { CORE_REMOVED_ROLE_IDS, activeCoreRoleDefinitions, coreWinner, defaultAllRoleSetup, exactDuplicateCoreSkills, installCoreRules } from "../.test-build/core-rules.js";
 import { ABSTAIN_TARGET, createVoteSnapshot } from "../.test-build/equal-vote.js";
 import { installHouseRules } from "../.test-build/house-rules.js";
+import { WORD_ROLE_IDS } from "../.test-build/word-role-allowlist.js";
 
 function player(id, role, factionOverride) {
   return { id, token: `t-${id}`, name: id, nameKey: id, alive: true, isAI: false, isSpectator: false, role, ...(factionOverride ? { factionOverride } : {}), joinedAt: 0 };
@@ -24,6 +25,13 @@ test("default room role pool starts every active role at one and removes depreca
   for (const count of Object.values(setup)) assert.equal(count, 1);
   for (const id of CORE_REMOVED_ROLE_IDS) assert.equal(setup[id], undefined);
   assert.ok(Object.keys(setup).length > 80);
+});
+
+test("Gold Water is absent from the canonical product role surface", () => {
+  assert.equal(activeCoreRoleDefinitions().some((role) => role.id === "confirmed_villager" || role.name === "金水"), false);
+  assert.equal(WORD_ROLE_IDS.includes("confirmed_villager"), false);
+  const roleNames = readFileSync(new URL("../public/role-name-i18n.js", import.meta.url), "utf8");
+  assert.doesNotMatch(roleNames, /金水|Confirmed Villager/);
 });
 
 test("active core role pool has no exact duplicate same-faction skill signatures", () => {
