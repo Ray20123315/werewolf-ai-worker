@@ -1,12 +1,11 @@
 export const MAX_ADMIN_TOKENS = 8;
-export const MIN_ADMIN_TOKEN_LENGTH = 24;
 
 export function parseAdminTokens(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
   const out: string[] = [];
   for (const item of raw.split(/[\n,;]+/g)) {
     const token = item.trim();
-    if (token.length < MIN_ADMIN_TOKEN_LENGTH || token.length > 1024 || out.includes(token)) continue;
+    if (!token || out.includes(token)) continue;
     out.push(token);
     if (out.length >= MAX_ADMIN_TOKENS) break;
   }
