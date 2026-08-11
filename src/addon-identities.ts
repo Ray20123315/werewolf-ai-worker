@@ -4,12 +4,12 @@ import type { GameState, Player, RoleSetup } from "./types.js";
 
 type RoomPrototype = Record<string, any> & { __addonIdentitiesInstalled?: boolean };
 type RuntimeAITask = { playerId: string; operation: string };
-type AddonIdentity = "lover" | "masochist_cultist" | "sadist_leader";
+const MASOCHIST = "masochist_cultist" as const;
+const SADIST = "sadist_leader" as const;
+const LOVER = "lover" as const;
+type AddonIdentity = typeof LOVER | typeof MASOCHIST | typeof SADIST;
 type AddonPlayer = Player & { addonRoles?: AddonIdentity[]; loverId?: string };
 
-const MASOCHIST: AddonIdentity = "masochist_cultist";
-const SADIST: AddonIdentity = "sadist_leader";
-const LOVER: AddonIdentity = "lover";
 const CONFIGURED_ADDONS = [MASOCHIST, SADIST] as const;
 const SADIST_AI_OPERATION = "addon_sadist_probe";
 
