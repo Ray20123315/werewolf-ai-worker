@@ -4,6 +4,7 @@ import { installAddonIdentityRules } from "./addon-identities.js";
 import { installEqualVoteRules } from "./equal-vote.js";
 import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
+import { installOfficialSourceRules } from "./source-rules.js";
 import type { ChatMessage, GameState, Player } from "./types.js";
 
 type ChatChannel = "public" | "werewolf" | "lovers";
@@ -70,6 +71,7 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   installAIFlowRules(GameRoomCtor);
   installAISanityRules(GameRoomCtor);
   installAddonIdentityRules(GameRoomCtor);
+  installOfficialSourceRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
