@@ -1,11 +1,24 @@
 .admin-shell { padding-bottom: 4rem; }
-.admin-login { max-width: 560px; margin: 7vh auto 0; }
+.admin-shell .brandbar { flex-wrap: wrap; }
+.admin-shell .brand-actions { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+.admin-login {
+  width: min(560px, 100%);
+  max-width: 560px;
+  margin: 7vh auto 0;
+  padding: clamp(24px, 4vw, 38px);
+}
+.admin-login .section-heading { margin-bottom: 18px; }
+.admin-login > p { margin: 0 0 18px; color: var(--muted); line-height: 1.65; }
+.admin-login .stack-form { margin-top: 0; }
 .admin-dashboard { display: grid; gap: 1rem; }
+.admin-dashboard > .panel,
+.admin-wide,
+.admin-side { padding: clamp(18px, 2.5vw, 24px); }
 .admin-toolbar { display: flex; justify-content: space-between; gap: 1rem; align-items: end; }
 .admin-toolbar h1 { margin: .2rem 0 0; }
 .admin-toolbar-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .admin-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
-.admin-stat { display: grid; gap: .35rem; }
+.admin-stat { display: grid; gap: .35rem; padding: 18px 20px; }
 .admin-stat span { opacity: .68; font-size: .85rem; }
 .admin-stat strong { font-size: 1.7rem; }
 .admin-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, .8fr); gap: 1rem; align-items: start; }
@@ -29,8 +42,32 @@
 .translation-status { margin: 0 0 .55rem; padding: .55rem .7rem; border-radius: 10px; background: rgba(170, 86, 56, .12); font-size: .85rem; }
 .translation-warning { margin-left: .5rem; font-size: .7rem; font-weight: 700; opacity: .7; }
 .player-actions { display: flex; gap: .35rem; flex-wrap: wrap; justify-content: flex-end; }
+
 @media (max-width: 900px) {
   .admin-grid, .admin-stats { grid-template-columns: 1fr; }
   .admin-toolbar { align-items: stretch; flex-direction: column; }
   .admin-inline-form { align-items: stretch; flex-direction: column; }
+}
+
+@media (max-width: 760px) {
+  .admin-shell .brandbar { align-items: flex-start; }
+  .admin-shell .brand-actions {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 7px;
+  }
+  .admin-login { margin-top: 3vh; }
+}
+
+@media (max-width: 520px) {
+  .admin-shell .brand-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .admin-shell .brand-actions > * {
+    width: 100%;
+    min-width: 0;
+  }
+  .admin-login { padding: 20px 18px; border-radius: 18px; }
+  .admin-room-meta { grid-template-columns: 1fr; }
 }
