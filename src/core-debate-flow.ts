@@ -11,7 +11,7 @@ type RuntimeRoom = {
   touchAndSave(state: GameState): void;
 };
 
-export function installDebateFlowRules(GameRoomCtor: { prototype: RoomPrototype }): void {
+export function installCoreDebateFlowRules(GameRoomCtor: { prototype: RoomPrototype }): void {
   const proto = GameRoomCtor.prototype;
   if (proto.__debateFlowRulesInstalled) return;
   proto.__debateFlowRulesInstalled = true;
@@ -56,7 +56,7 @@ export function installDebateFlowRules(GameRoomCtor: { prototype: RoomPrototype 
     proto.sendChat = function (this: RuntimeRoom, token: string, content: string, locale?: AppLocale): void {
       const state = this.requireState();
       if (state.phase === "debate") {
-        throw new Error("正式發言依序進行中：一般聊天已暫停；請等待輪到你，並使用正式發言框送出。 ");
+        throw new Error("正式發言依序進行中：一般聊天已暫停；請等待輪到你，並使用正式發言框送出。");
       }
       return originalSendChat.call(this, token, content, locale);
     };
