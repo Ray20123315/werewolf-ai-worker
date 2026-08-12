@@ -145,57 +145,73 @@ async function callOpenAICompatible(
   return { text: extractChatCompletionText(response), provider: "openai-compatible", model };
 }
 
-async function fetchJson(url: string, options: { headers: Record<string, string>; body: unknown }): Promise<unknown> {
+async function fetchJson(url: string, options: { headers?: Record<string, string>; body: unknown }): Promise<unknown> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json", ...options.headers },
-    body: JSON.stringify(options.body)
+    headers: {
+      "content-type": "application/json",
+      ...(options.headers ?? {})
+    },
+    body: JSON.stringify(options.body),
+    signal: AbortSignal.timeout(30_000)
   });
-  const text = await response.text();
-  if (!response.ok) throw new AIProviderError(`AI provider HTTP ${response.status}`, response.status, text.slice(0, 1000));
-  try { return JSON.parse(text); }
-  catch { throw new Error("AI provider 回傳非 JSON 內容"); }
+  const payload = await response.json().catch(() => undefined) as unknown;
+  if (!response.ok) {
+    const detail = safeErrorDetail(payload);
+    throw new AIProviderError(`AI provider HTTP ${response.status}${detail ? `: ${detail}` : ""}`, response.status, detail);
+  }
+  return payload;
 }
 
-function extractOpenAIText(data: unknown): string {
-  const root = asRecord(data);
+function extractOpenAIText(payload: unknown): string {
+  const root = asRecord(payload);
+  if (typeof root.output_text === "string" && root.output_text.trim()) return root.output_text.trim();
   const output = asArray(root.output);
-  const chunks: string[] = [];
-  for (const item of output) {
-    const content = asArray(asRecord(item).content);
-    for (const part of content) {
+  const text = output
+    .flatMap((item) => asArray(asRecord(item).content))
+    .map((part) => {
       const record = asRecord(part);
-      if (record.type === "output_text" && typeof record.text === "string") chunks.push(record.text);
-    }
-  }
-  const text = chunks.join("\n").trim();
+      return typeof record.text === "string" ? record.text : "";
+    })
+    .join("")
+    .trim();
   if (!text) throw new Error("OpenAI 回傳空白內容");
   return text;
 }
 
-function extractChatCompletionText(data: unknown): string {
-  const choices = asArray(asRecord(data).choices);
-  const first = asRecord(choices[0]);
-  const message = asRecord(first.message);
-  const text = typeof message.content === "string" ? message.content.trim() : "";
-  if (!text) throw new Error("AI provider 回傳空白內容");
-  return text;
+function extractChatCompletionText(payload: unknown): string {
+  const choices = asArray(asRecord(payload).choices);
+  const content = asRecord(asRecord(choices[0]).message).content;
+  if (typeof content !== "string" || !content.trim()) throw new Error("AI 回傳空白內容");
+  return content.trim();
+}
+
+function safeErrorDetail(payload: unknown): string {
+  const root = asRecord(payload);
+  const error = asRecord(root.error);
+  const message = error.message ?? root.message;
+  return typeof message === "string" ? message.slice(0, 300) : "";
 }
 
 function requireCredential(value: string): string {
   const key = value.trim();
-  if (!key) throw new Error("API Key 不可為空");
+  if (!key || key.length > 1024) throw new Error("請輸入有效的 API Key");
   return key;
 }
 
 function requireBaseUrl(value: string | undefined): string {
-  const url = (value || "").trim().replace(/\/+$/, "");
-  if (!/^https:\/\//i.test(url)) throw new Error("OpenAI Compatible Base URL 必須使用 https://");
-  return url;
+  if (!value?.trim()) throw new Error("OpenAI-compatible Provider 必須設定 Base URL");
+  const parsed = new URL(value.trim());
+  if (parsed.protocol !== "https:") throw new Error("自訂 API Base URL 必須使用 HTTPS");
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local")) {
+    throw new Error("自訂 API Base URL 不可指向本機位址");
+  }
+  return parsed.toString().replace(/\/$/, "");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function asArray(value: unknown): unknown[] {
@@ -203,5 +219,17 @@ function asArray(value: unknown): unknown[] {
 }
 
 function assertNever(value: never): never {
-  throw new Error(`不支援的 AI provider：${String(value)}`);
+  throw new Error(`未知 AI provider: ${String(value)}`);
+}
+
+export function parseJSONObject(text: string): Record<string, unknown> {
+  const trimmed = text.trim();
+  try {
+    return asRecord(JSON.parse(trimmed));
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) return asRecord(JSON.parse(trimmed.slice(start, end + 1)));
+    throw new Error("AI 回應不是有效 JSON");
+  }
 }
