@@ -2,6 +2,7 @@ import { installCoreIntegrityRules } from "./core-integrity.js";
 import { installCorePhaseAIRules } from "./core-phase-ai.js";
 import { installCoreRelationshipRules } from "./core-relationships.js";
 import { installCoreStateRules } from "./core-state.js";
+import { installCoreTerminalRules } from "./core-terminal.js";
 
 export {
   CORE_REMOVED_ROLE_IDS,
@@ -22,4 +23,5 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
   installCoreRelationshipRules(GameRoomCtor);
   installCorePhaseAIRules(GameRoomCtor);
   installCoreIntegrityRules(GameRoomCtor);
+  installCoreTerminalRules(GameRoomCtor);
 }
