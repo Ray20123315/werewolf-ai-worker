@@ -28,5 +28,7 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
   installCoreIntegrityRules(GameRoomCtor);
   installCoreTerminalRules(GameRoomCtor);
   installCoreFakeDeathRules(GameRoomCtor);
-  installCoreAuditHardeningRules(GameRoomCtor as unknown as Parameters<typeof installCoreAuditHardeningRules>[0]);
+  if (typeof proto.systemMem === "function" && typeof proto.mem === "function" && typeof proto.touchAndSave === "function") {
+    installCoreAuditHardeningRules(GameRoomCtor as unknown as Parameters<typeof installCoreAuditHardeningRules>[0]);
+  }
 }
