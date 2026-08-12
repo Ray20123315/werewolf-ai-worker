@@ -1,3 +1,4 @@
+import { installCoreIntegrityRules } from "./core-integrity.js";
 import { installCorePhaseAIRules } from "./core-phase-ai.js";
 import { installCoreRelationshipRules } from "./core-relationships.js";
 import { installCoreStateRules } from "./core-state.js";
@@ -11,6 +12,7 @@ export {
   defaultAllRoleSetup,
   exactDuplicateCoreSkills
 } from "./core-state.js";
+export { canonicalReactionResume, coreActionAvailable, coreActionOptions, normalizeDebateCursor } from "./core-integrity.js";
 
 export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> & { __coreRulesInstalled?: boolean } }): void {
   const proto = GameRoomCtor.prototype;
@@ -19,4 +21,5 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
   installCoreStateRules(GameRoomCtor);
   installCoreRelationshipRules(GameRoomCtor);
   installCorePhaseAIRules(GameRoomCtor);
+  installCoreIntegrityRules(GameRoomCtor);
 }
