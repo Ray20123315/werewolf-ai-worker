@@ -1,4 +1,5 @@
 import "./core-role-text.js";
+import { installCoreAuditHardeningRules } from "./core-audit-hardening.js";
 import { installCoreFakeDeathRules } from "./core-fake-death.js";
 import { installCoreIntegrityRules } from "./core-integrity.js";
 import { installCorePhaseAIRules } from "./core-phase-ai.js";
@@ -27,4 +28,5 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
   installCoreIntegrityRules(GameRoomCtor);
   installCoreTerminalRules(GameRoomCtor);
   installCoreFakeDeathRules(GameRoomCtor);
+  installCoreAuditHardeningRules(GameRoomCtor);
 }
