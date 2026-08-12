@@ -1,6 +1,7 @@
 html, body { min-height: 100%; height: auto !important; overflow-x: hidden; overflow-y: auto !important; }
 body { min-height: 100dvh; overscroll-behavior-y: auto; -webkit-overflow-scrolling: touch; }
 .admin-shell, .admin-dashboard { height: auto !important; max-height: none !important; overflow: visible !important; }
+.admin-side { position: static !important; max-height: none !important; overflow: visible !important; }
 
 .admin-toolkit-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: -2px 0 10px; }
 .admin-toolkit-actions .button { min-height: 34px; padding: 0 10px; font-size: .72rem; }
@@ -16,9 +17,6 @@ body { min-height: 100dvh; overscroll-behavior-y: auto; -webkit-overflow-scrolli
 .admin-disband-button { color: #fff !important; border-color: var(--danger) !important; background: var(--danger) !important; }
 .admin-disband-button:hover:not(:disabled) { filter: brightness(.92); }
 
-@media (max-width: 900px) {
-  .admin-side { overflow: visible !important; max-height: none !important; }
-}
 @media (max-width: 680px) {
   .admin-toolkit-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .admin-toolkit-actions .button { width: 100%; min-width: 0; }
