@@ -80,6 +80,39 @@ test("same source and target locale skips remote translation and requires no key
   assert.equal(called, false);
 });
 
+test("overlapping live translation batches coalesce identical in-flight text", async () => {
+  let duplicateRequests = 0;
+  let markDuplicateStarted;
+  let releaseDuplicate;
+  const duplicateStarted = new Promise((resolve) => { markDuplicateStarted = resolve; });
+  const duplicateGate = new Promise((resolve) => { releaseDuplicate = resolve; });
+
+  const fetcher = async (input) => {
+    const url = new URL(String(input));
+    assert.equal(`${url.origin}${url.pathname}`, GOOGLE_TRANSLATE_ENDPOINT);
+    const source = url.searchParams.get("q");
+    if (source === "重複訊息") {
+      duplicateRequests += 1;
+      markDuplicateStarted();
+      await duplicateGate;
+    }
+    const translated = source === "重複訊息" ? "Repeated message" : "New message";
+    return new Response(JSON.stringify([[[translated, source, null, null]]]), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  const firstBatch = translateTexts(fetcher, ["重複訊息"], "en", "zh-TW");
+  await duplicateStarted;
+  const overlappingBatch = translateTexts(fetcher, ["重複訊息", "新訊息"], "en", "zh-TW");
+  releaseDuplicate();
+
+  assert.deepEqual(await firstBatch, ["Repeated message"]);
+  assert.deepEqual(await overlappingBatch, ["Repeated message", "New message"]);
+  assert.equal(duplicateRequests, 1);
+});
+
 test("AI BYOK key pools support up to eight deduplicated keys", () => {
   const values = Array.from({ length: MAX_AI_KEYS + 3 }, (_, index) => `ai-key-${index}`);
   assert.deepEqual(normalizeCredentialPool([...values, "ai-key-0"]), values.slice(0, MAX_AI_KEYS));
