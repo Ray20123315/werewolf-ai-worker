@@ -4,6 +4,7 @@ import { installCoreFakeDeathRules } from "./core-fake-death.js";
 import { installCoreIntegrityRules } from "./core-integrity.js";
 import { installCoreMagicianRules } from "./core-magician.js";
 import { installCorePhaseAIRules } from "./core-phase-ai.js";
+import { installPost28FinalizeRules } from "./core-post28-finalize.js";
 import { installPost28FullRepairRules } from "./core-post28-repair.js";
 import { installCoreRelationshipRules } from "./core-relationships.js";
 import { installCoreStateRules } from "./core-state.js";
@@ -36,5 +37,6 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
   if (typeof proto.systemMem === "function" && typeof proto.mem === "function" && typeof proto.touchAndSave === "function") {
     installCoreAuditHardeningRules(GameRoomCtor as unknown as Parameters<typeof installCoreAuditHardeningRules>[0]);
     installPost28FullRepairRules(GameRoomCtor as unknown as Parameters<typeof installPost28FullRepairRules>[0]);
+    installPost28FinalizeRules(GameRoomCtor as unknown as Parameters<typeof installPost28FinalizeRules>[0]);
   }
 }
