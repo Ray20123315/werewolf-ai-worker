@@ -23,7 +23,6 @@ import {
   randomTopVoteTarget,
   resolveNight,
   roleDeckFromSetup,
-  sheriffSecondVoteKey,
   topWeightedVoteTargets,
   validateRoleSetup,
   weightedVoteCounts
@@ -174,7 +173,7 @@ test("plurality returns unique top target and no target on tie", () => {
   assert.equal(pluralityTarget({ a: "x", b: "y" }), undefined);
 });
 
-test("random tie elimination can only select a highest-vote tied candidate", () => {
+test("compatibility tally randomizes only tied highest candidates", () => {
   const state = baseState([p("a", "villager"), p("b", "villager"), p("c", "werewolf"), p("d", "villager")], {
     a: "b", b: "c", c: "b", d: "c"
   });
@@ -182,33 +181,20 @@ test("random tie elimination can only select a highest-vote tied candidate", () 
   for (let i = 0; i < 64; i += 1) assert.ok(["b", "c"].includes(randomTopVoteTarget(state)));
 });
 
-test("weighted voting supports zero-weight and PK top target detection", () => {
+test("base compatibility tally uses one ballot and role-defined invalidity, never numeric vote weight", () => {
   const state = baseState([p("m", "masochist_cultist"), p("v", "villager"), p("w", "werewolf")], { m: "w", v: "w", w: "v" });
+  state.roleMemory.v = { voteBonus: 99 };
   assert.deepEqual(weightedVoteCounts(state), { w: 1, v: 1 });
   assert.deepEqual(new Set(topWeightedVoteTargets(state)), new Set(["v", "w"]));
 });
 
-test("sheriff owns two independent exile ballots and may split them", () => {
-  const second = sheriffSecondVoteKey("s");
-  const state = baseState([p("s", "villager"), p("v", "villager"), p("w", "werewolf")], { s: "w", [second]: "v", v: "w", w: "v" });
+test("sheriff has no second ordinary ballot and vote completion ignores pseudo keys", () => {
+  const players = [p("s", "villager"), p("w", "werewolf")];
+  const state = baseState(players, { s: "w", w: "s", "s::sheriff2": "w" });
   state.sheriff.enabled = true;
   state.sheriff.sheriffId = "s";
-  assert.deepEqual(weightedVoteCounts(state), { w: 2, v: 2 });
-
-  state.votes[second] = "w";
-  assert.deepEqual(weightedVoteCounts(state), { w: 3, v: 1 });
-
-  state.roleMemory.s = { voteBonus: 2 };
-  assert.deepEqual(weightedVoteCounts(state), { w: 5, v: 1 });
-});
-
-test("vote completion waits for the sheriff second ballot", () => {
-  const players = [p("s", "villager"), p("w", "werewolf")];
-  const state = baseState(players, { s: "w", w: "s" });
-  state.sheriff.sheriffId = "s";
-  assert.equal(areVotesComplete(state), false);
-  state.votes[sheriffSecondVoteKey("s")] = "w";
   assert.equal(areVotesComplete(state), true);
+  assert.deepEqual(weightedVoteCounts(state), { w: 1, s: 1 });
 });
 
 test("guard prevents a wolf kill", () => {
@@ -318,7 +304,7 @@ test("AI can vote immediately when no living humans remain", () => {
   assert.equal(isAIVotingUnlocked(players, {}), true);
 });
 
-test("vote completion only requires living formal players when there is no living sheriff", () => {
+test("vote completion only requires living formal players", () => {
   const state = baseState([p("a", "villager"), p("b", "werewolf", false)], { a: "b" });
   assert.equal(areVotesComplete(state), true);
 });
