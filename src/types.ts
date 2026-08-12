@@ -343,7 +343,8 @@ export interface GameState {
   lastNightDeaths: string[];
   deathReasons: Record<string, string>;
   lastVoteEliminated?: string;
-  winner?: Winner;
+  /** Legacy/base engine faction winner. Composed draw terminal is an ended state projected as Winner. */
+  winner?: Faction;
   winnerPlayerIds?: string[];
   winnerLabel?: string;
   pendingReaction?: PendingReaction;
