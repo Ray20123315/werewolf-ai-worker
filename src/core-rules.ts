@@ -1,5 +1,6 @@
 import "./core-role-text.js";
 import { installCoreAuditHardeningRules } from "./core-audit-hardening.js";
+import { installCoreDebateFlowRules } from "./core-debate-flow.js";
 import { installCoreFakeDeathRules } from "./core-fake-death.js";
 import { installCoreIntegrityRules } from "./core-integrity.js";
 import { installCoreMagicianRules } from "./core-magician.js";
@@ -39,4 +40,8 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
     installPost28FullRepairRules(GameRoomCtor as unknown as Parameters<typeof installPost28FullRepairRules>[0]);
     installPost28FinalizeRules(GameRoomCtor as unknown as Parameters<typeof installPost28FinalizeRules>[0]);
   }
+  // This compatibility invariant must be outermost: audit/post-28 layers may
+  // create/persist deadlines during their composed save path, so debate flow
+  // clears only the debate deadline after those layers finish.
+  installCoreDebateFlowRules(GameRoomCtor);
 }
