@@ -196,8 +196,11 @@
         syncFlowClarity();
       });
     };
-    const observer = new MutationObserver(schedule);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const area = document.querySelector("#actionArea");
+    if (area) {
+      const observer = new MutationObserver(schedule);
+      observer.observe(area, { childList: true, subtree: true });
+    }
     document.querySelector("#languageSelect")?.addEventListener("change", () => setTimeout(schedule, 0));
     schedule();
   }
