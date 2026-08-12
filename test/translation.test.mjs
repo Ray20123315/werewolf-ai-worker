@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { MAX_AI_KEYS, normalizeCredentialPool, callAIWithKeys } from "../.test-build/ai.js";
 import {
   GOOGLE_TRANSLATE_ENDPOINT,
+  GOOGLE_TRANSLATE_FALLBACK_ENDPOINT,
   MYMEMORY_TRANSLATE_ENDPOINT,
   MAX_TRANSLATION_TEXTS,
   normalizeTranslationLocale,
@@ -52,15 +53,34 @@ test("Google chat translation matches the provided Userscript client=gtx request
   }
 });
 
-test("MyMemory is used as a short-text fallback when Google is unavailable", async () => {
+test("secondary Google endpoint is used when the primary endpoint is unavailable", async () => {
   const attempted = [];
   const fetcher = async (input) => {
     const url = new URL(String(input));
-    attempted.push(`${url.origin}${url.pathname}`);
-    if (`${url.origin}${url.pathname}` === GOOGLE_TRANSLATE_ENDPOINT) {
+    const endpoint = `${url.origin}${url.pathname}`;
+    attempted.push(endpoint);
+    if (endpoint === GOOGLE_TRANSLATE_ENDPOINT) return new Response("primary unavailable", { status: 503 });
+    assert.equal(endpoint, GOOGLE_TRANSLATE_FALLBACK_ENDPOINT);
+    return new Response(JSON.stringify([[['Fallback works', url.searchParams.get("q"), null, null]]]), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  assert.deepEqual(await translateTexts(fetcher, ["備援端點測試"], "en", "zh-TW"), ["Fallback works"]);
+  assert.deepEqual(attempted, [GOOGLE_TRANSLATE_ENDPOINT, GOOGLE_TRANSLATE_FALLBACK_ENDPOINT]);
+});
+
+test("MyMemory is used as a short-text fallback when both Google endpoints are unavailable", async () => {
+  const attempted = [];
+  const fetcher = async (input) => {
+    const url = new URL(String(input));
+    const endpoint = `${url.origin}${url.pathname}`;
+    attempted.push(endpoint);
+    if (endpoint === GOOGLE_TRANSLATE_ENDPOINT || endpoint === GOOGLE_TRANSLATE_FALLBACK_ENDPOINT) {
       return new Response("upstream unavailable", { status: 503 });
     }
-    assert.equal(`${url.origin}${url.pathname}`, MYMEMORY_TRANSLATE_ENDPOINT);
+    assert.equal(endpoint, MYMEMORY_TRANSLATE_ENDPOINT);
     assert.equal(url.searchParams.get("q"), "你好");
     assert.equal(url.searchParams.get("langpair"), "zh-TW|en");
     return new Response(JSON.stringify({ responseData: { translatedText: "Hello" } }), {
@@ -70,7 +90,24 @@ test("MyMemory is used as a short-text fallback when Google is unavailable", asy
   };
 
   assert.deepEqual(await translateTexts(fetcher, ["你好"], "en", "zh-TW"), ["Hello"]);
-  assert.deepEqual(attempted, [GOOGLE_TRANSLATE_ENDPOINT, MYMEMORY_TRANSLATE_ENDPOINT]);
+  assert.deepEqual(attempted, [GOOGLE_TRANSLATE_ENDPOINT, GOOGLE_TRANSLATE_FALLBACK_ENDPOINT, MYMEMORY_TRANSLATE_ENDPOINT]);
+});
+
+test("successful live translations are reused from the bounded completed-result cache", async () => {
+  let requests = 0;
+  const fetcher = async (input) => {
+    requests += 1;
+    const url = new URL(String(input));
+    const source = url.searchParams.get("q");
+    return new Response(JSON.stringify([[['Cached result', source, null, null]]]), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  assert.deepEqual(await translateTexts(fetcher, ["快取專用字串"], "en", "zh-TW"), ["Cached result"]);
+  assert.deepEqual(await translateTexts(fetcher, ["快取專用字串"], "en", "zh-TW"), ["Cached result"]);
+  assert.equal(requests, 1);
 });
 
 test("same source and target locale skips remote translation and requires no key", async () => {

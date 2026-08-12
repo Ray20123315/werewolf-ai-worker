@@ -9,7 +9,7 @@ function source(relative) {
 }
 
 test("compact UI scripts pass browser syntax checks", () => {
-  for (const relative of ["../public/static-copy.js", "../public/compact-ui.js"]) {
+  for (const relative of ["../public/static-copy.js", "../public/compact-ui.js", "../public/ui-runtime-repair.js"]) {
     const path = fileURLToPath(new URL(relative, import.meta.url));
     const result = spawnSync(process.execPath, ["--check", path], { encoding: "utf8" });
     assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
@@ -64,6 +64,36 @@ test("remaining fixed labels use repository-owned static translations", () => {
   assert.match(admin, /src="\/game-i18n\.js"/);
   assert.match(admin, /src="\/static-copy\.js"/);
   assert.match(admin, /src="\/ui-fixes\.js"/);
+});
+
+test("room display mode is an explicit working control with materially different compact behavior", () => {
+  const html = source("../public/index.html");
+  const repair = source("../public/ui-runtime-repair.js");
+
+  assert.match(html, /src="\/room-toolkit\.js"><\/script>\s*<script src="\/ui-runtime-repair\.js"><\/script>/s);
+  assert.match(repair, /button\.addEventListener\("click"/);
+  assert.match(repair, /localStorage\.setItem\(MODE_KEY, enabled \? "1" : "0"\)/);
+  assert.match(repair, /aria-pressed/);
+  assert.match(repair, /目前：一般模式/);
+  assert.match(repair, /目前：精簡模式/);
+  assert.match(repair, /切換一般模式/);
+  assert.match(repair, /切換精簡模式/);
+  assert.match(repair, /\.room-compact-mode #roomPlayerTools/);
+  assert.match(repair, /\.room-compact-mode #roomMessageTools/);
+  assert.match(repair, /\.room-compact-mode \.room-quick-tools > \.room-toolkit-stat/);
+  assert.match(repair, /pointer-events: auto !important/);
+});
+
+test("fixed copy stays local while auto-detected player text still reaches live translation", () => {
+  const repair = source("../public/ui-runtime-repair.js");
+  const app = source("../public/app.js");
+
+  assert.match(repair, /explicitSource = typeof body\.sourceLocale === "string" && body\.sourceLocale !== "auto"/);
+  assert.match(repair, /window\.WerewolfGameI18n/);
+  assert.match(repair, /localOnly: true/);
+  assert.match(repair, /return nativeFetch\(input, init\)/);
+  assert.match(app, /m\.kind === "chat" \|\| m\.kind === "speech" \? "auto"/);
+  assert.match(app, /if \(sourceLocale && sourceLocale !== "auto"\) body\.sourceLocale = sourceLocale/);
 });
 
 test("admin layout and credential documentation stay regression protected", () => {
