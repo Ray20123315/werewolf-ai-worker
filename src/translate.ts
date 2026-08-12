@@ -1,6 +1,7 @@
 export type TranslationLocale = "zh-TW" | "zh-CN" | "en";
 
 export const GOOGLE_TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
+export const GOOGLE_TRANSLATE_FALLBACK_ENDPOINT = "https://translate.google.com/translate_a/single";
 export const MYMEMORY_TRANSLATE_ENDPOINT = "https://api.mymemory.translated.net/get";
 export const MAX_TRANSLATION_TEXTS = 40;
 export const MAX_TRANSLATION_TEXT_LENGTH = 4200;
@@ -10,11 +11,15 @@ export const REQUEST_TIMEOUT_MS = 6500;
 export const MYMEMORY_HEDGE_DELAY_MS = 180;
 export const GOOGLE_PREFERENCE_GRACE_MS = 140;
 export const MYMEMORY_MAX_BYTES = 500;
+export const TRANSLATION_CACHE_TTL_MS = 10 * 60_000;
+export const TRANSLATION_CACHE_MAX_ENTRIES = 600;
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type TranslationCandidate = { translatedText: string; provider: "google" | "mymemory" };
+type CachedTranslation = { value: string; expiresAt: number };
 
 const inFlightTranslations = new Map<string, Promise<string>>();
+const completedTranslations = new Map<string, CachedTranslation>();
 
 export function normalizeTranslationLocale(value: unknown): TranslationLocale | undefined {
   if (value === "zh-TW" || value === "zh-CN" || value === "en") return value;
@@ -59,12 +64,16 @@ function translateTextCoalesced(
   sourceLocale?: TranslationLocale
 ): Promise<string> {
   const key = `${sourceLocale ?? "auto"}\u0000${targetLocale}\u0000${text}`;
+  const cached = getCompletedTranslation(key);
+  if (cached) return Promise.resolve(cached);
+
   const existing = inFlightTranslations.get(key);
   if (existing) return existing;
 
   const task = translateWithLowLatency(fetcher, text, targetLocale)
     .then((translated) => {
       if (!translated) throw new Error("玩家聊天翻譯服務暫時無法使用");
+      rememberCompletedTranslation(key, translated);
       return translated;
     })
     .finally(() => {
@@ -112,7 +121,26 @@ async function translateWithLowLatency(
 }
 
 async function translateViaGoogle(fetcher: FetchLike, text: string, targetLocale: TranslationLocale): Promise<string> {
-  const url = new URL(GOOGLE_TRANSLATE_ENDPOINT);
+  let lastError: unknown;
+  for (const endpoint of [GOOGLE_TRANSLATE_ENDPOINT, GOOGLE_TRANSLATE_FALLBACK_ENDPOINT]) {
+    try {
+      const translated = await translateViaGoogleEndpoint(fetcher, endpoint, text, targetLocale);
+      if (translated) return translated;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastError) throw lastError;
+  return "";
+}
+
+async function translateViaGoogleEndpoint(
+  fetcher: FetchLike,
+  endpoint: string,
+  text: string,
+  targetLocale: TranslationLocale
+): Promise<string> {
+  const url = new URL(endpoint);
   url.searchParams.set("client", "gtx");
   url.searchParams.set("sl", "auto");
   url.searchParams.set("tl", targetLocale);
@@ -155,6 +183,26 @@ async function translateViaMyMemory(
     if (translated) return translated;
   }
   return "";
+}
+
+function getCompletedTranslation(key: string): string | undefined {
+  const cached = completedTranslations.get(key);
+  if (!cached) return undefined;
+  if (cached.expiresAt <= Date.now()) {
+    completedTranslations.delete(key);
+    return undefined;
+  }
+  return cached.value;
+}
+
+function rememberCompletedTranslation(key: string, value: string): void {
+  if (completedTranslations.has(key)) completedTranslations.delete(key);
+  while (completedTranslations.size >= TRANSLATION_CACHE_MAX_ENTRIES) {
+    const oldest = completedTranslations.keys().next().value as string | undefined;
+    if (!oldest) break;
+    completedTranslations.delete(oldest);
+  }
+  completedTranslations.set(key, { value, expiresAt: Date.now() + TRANSLATION_CACHE_TTL_MS });
 }
 
 function canUseMyMemoryTranslation(text: string, targetLocale: TranslationLocale): boolean {
