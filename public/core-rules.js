@@ -47,6 +47,8 @@
   let reconnectTimer = 0;
   let timerInterval = 0;
   let applying = false;
+  let observer = null;
+  const OBSERVER_OPTIONS = { childList: true, subtree: true };
 
   const locale = () => {
     const value = localStorage.getItem("werewolf-locale");
@@ -342,10 +344,27 @@
     if (applying) return;
     applying = true;
     setTimeout(() => {
-      applying = false;
-      apply();
-      setTimeout(apply, 80);
+      try {
+        runApplyWithoutObserver();
+      } finally {
+        setTimeout(() => {
+          try {
+            runApplyWithoutObserver();
+          } finally {
+            applying = false;
+          }
+        }, 80);
+      }
     }, 0);
+  }
+
+  function runApplyWithoutObserver() {
+    observer?.disconnect();
+    try {
+      apply();
+    } finally {
+      observer?.observe(document.body, OBSERVER_OPTIONS);
+    }
   }
 
   function apply() {
@@ -366,8 +385,8 @@
   function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
   function escapeAttr(value) { return escapeHtml(value); }
 
-  const observer = new MutationObserver(() => scheduleApply());
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer = new MutationObserver(() => scheduleApply());
+  observer.observe(document.body, OBSERVER_OPTIONS);
   document.querySelector("#languageSelect")?.addEventListener("change", () => setTimeout(scheduleApply, 0));
   connect();
   setInterval(connect, 1500);
