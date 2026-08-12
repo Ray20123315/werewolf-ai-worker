@@ -1,3 +1,4 @@
+import "./core-role-text.js";
 import { installCoreIntegrityRules } from "./core-integrity.js";
 import { installCorePhaseAIRules } from "./core-phase-ai.js";
 import { installCoreRelationshipRules } from "./core-relationships.js";
