@@ -3,6 +3,7 @@ import { roleDefinition } from "./roles.js";
 import type { GameState, Player } from "./types.js";
 
 type RoomPrototype = Record<string, any> & { __equalVoteRulesInstalled?: boolean };
+type RuntimePlayer = Player & { addonRoles?: string[] };
 
 export const AUTO_SKIP_TARGET = "__ai_auto_skip__";
 export const ABSTAIN_TARGET = "__abstain__";
@@ -47,6 +48,11 @@ export function sanitizeExileVotes(state: GameState): boolean {
   return changed;
 }
 
+export function hasMasochistAddon(player: Player): boolean {
+  const runtime = player as RuntimePlayer;
+  return player.role === "masochist_cultist" || (Array.isArray(runtime.addonRoles) && runtime.addonRoles.includes("masochist_cultist"));
+}
+
 export function createVoteSnapshot(state: GameState): VoteSnapshot {
   const players = validExilePlayers(state);
   const validIds = new Set(players.map((player) => player.id));
@@ -67,6 +73,11 @@ export function createVoteSnapshot(state: GameState): VoteSnapshot {
     const target = state.players.find((player) => player.id === targetId);
     if (!target || !validIds.has(targetId) || targetId === voter.id) {
       entries.push({ voterId: voter.id, targetId, status: "invalid", reason: !target || !validIds.has(targetId) ? "目標無效" : "不能投給自己" });
+      continue;
+    }
+
+    if (hasMasochistAddon(voter)) {
+      entries.push({ voterId: voter.id, targetId, status: "invalid", reason: "抖M附加身份的普通放逐票固定為無效票" });
       continue;
     }
 
@@ -155,12 +166,7 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
     const voter = validExilePlayers(state).find((player) => player.id === voterId);
     if (!voter) throw new Error("投票玩家無效");
     const voterMemory = this.mem(state, voter.id) as Record<string, any>;
-    const externallyInvalid = voterMemory.ravenInvalidVoteRound === state.round || voterMemory.bombHolder === voter.id;
-    const bonus = Number(voterMemory.voteBonus ?? 0);
-    if (voter.role === "berserker_wolf" && externallyInvalid && bonus > 0) {
-      voterMemory.voteBonus = bonus - 1;
-      voterMemory.berserkerVoteShieldRound = state.round;
-    } else delete voterMemory.berserkerVoteShieldRound;
+    delete voterMemory.berserkerVoteShieldRound;
 
     if (targetId === ABSTAIN_TARGET || targetId === AUTO_SKIP_TARGET) {
       state.votes[voter.id] = targetId;
@@ -168,6 +174,14 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
       const target = validExilePlayers(state).find((player) => player.id === targetId);
       if (!target) throw new Error("投票目標無效");
       if (voter.id === target.id) throw new Error("不能投給自己");
+
+      const externallyInvalid = voterMemory.ravenInvalidVoteRound === state.round || voterMemory.bombHolder === voter.id;
+      const bonus = Number(voterMemory.voteBonus ?? 0);
+      if (voter.role === "berserker_wolf" && !hasMasochistAddon(voter) && externallyInvalid && bonus > 0) {
+        voterMemory.voteBonus = bonus - 1;
+        voterMemory.berserkerVoteShieldRound = state.round;
+      }
+
       if (voterMemory.bombHolder === voter.id) {
         voterMemory.bombInvalidVoteRound = state.round;
         delete voterMemory.bombHolder;
