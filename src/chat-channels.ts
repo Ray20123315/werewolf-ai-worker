@@ -7,6 +7,7 @@ import { playerFaction } from "./game-engine.js";
 import { installHouseRules } from "./house-rules.js";
 import { installInspectionRules } from "./inspection-rules.js";
 import { installRelationshipRules } from "./relationship-rules.js";
+import { installRuntimeIntegrityRules } from "./runtime-integrity.js";
 import { installOfficialSourceRules } from "./source-rules.js";
 import { ROLE_IDS } from "./types.js";
 import type { ChatMessage, GameState, Player } from "./types.js";
@@ -91,6 +92,9 @@ export function installChatChannels(GameRoomCtor: { prototype: RoomPrototype }):
   installInspectionRules(GameRoomCtor);
   installRelationshipRules(GameRoomCtor);
   installCoreRules(GameRoomCtor);
+  // Final composed-runtime invariant layer. It must be installed last so it can
+  // reconcile phase/death/night/AI behavior after every legacy compatibility layer.
+  installRuntimeIntegrityRules(GameRoomCtor);
 }
 
 function sendSecretChat(this: any, token: string, content: string, channel: ChatChannel): void {
