@@ -62,7 +62,7 @@ export function installPost28FinalizeRules(GameRoomCtor: { prototype: RoomProtot
 
       if (actor.role === "elder_wolf" && effect === "elder_force_dawn" && state.phase === "night") {
         const stored = state.nightActions.roleActions[actor.id];
-        if (stored?.effect === ("elder_force_dawn" as any) && stored.targetIds[0]) {
+        if (stored && stored.effect === ("elder_force_dawn" as any) && stored.targetIds[0]) {
           if (consumeNightSkillBlock(this, state, actor.id)) {
             delete state.nightActions.roleActions[actor.id];
             state.roleResults[actor.id] ??= {};
