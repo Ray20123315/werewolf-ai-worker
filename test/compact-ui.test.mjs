@@ -71,7 +71,7 @@ test("room display mode is an explicit working control with materially different
   const repair = source("../public/ui-runtime-repair.js");
 
   assert.match(html, /src="\/room-toolkit\.js"><\/script>\s*<script src="\/ui-runtime-repair\.js"><\/script>/s);
-  assert.match(repair, /replacement\.addEventListener\("click"/);
+  assert.match(repair, /button\.addEventListener\("click"/);
   assert.match(repair, /localStorage\.setItem\(MODE_KEY, enabled \? "1" : "0"\)/);
   assert.match(repair, /aria-pressed/);
   assert.match(repair, /目前：一般模式/);
