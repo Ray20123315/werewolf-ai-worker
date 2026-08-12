@@ -19,7 +19,6 @@ type PlayerListWithWinMeta = Player[] & {
   __initialGodEdge?: boolean;
 };
 const CIVILIAN_EDGE_ROLES = new Set<Role>(["villager", "confirmed_villager"]);
-const SHERIFF_SECOND_SUFFIX = "::sheriff2";
 
 export function defaultRoleSetup(playerCount: number): RoleSetup {
   const count = Math.max(1, Math.floor(playerCount) || 1);
@@ -322,39 +321,27 @@ export function isAIVotingUnlocked(players: Player[], votes: Record<string, stri
   return livingHumans.some((p) => Boolean(votes[p.id]));
 }
 
-export function sheriffSecondVoteKey(voterId: string): string {
-  return `${voterId}${SHERIFF_SECOND_SUFFIX}`;
-}
-
-export function effectiveVoteWeight(player: Player, target: Player | undefined, state: GameState): number {
-  if (!player.role) return 1;
-  const passives = new Set(roleDefinition(player.role).passives ?? []);
-  if (passives.has("vote_weight_zero")) return 0;
-  if (passives.has("vote_only_counts_against_non_village") && target && playerFaction(target) === "village") return 0;
-  const bonus = state.roleMemory[player.id]?.voteBonus;
-  return 1 + (typeof bonus === "number" ? Math.max(0, bonus) : 0);
-}
-
+/**
+ * Compatibility helpers for the legacy/base GameRoom. They intentionally use
+ * the same one-player-one-ballot semantics as EqualVote. The old sheriff
+ * second ballot and numeric vote-weight model were removed; these names remain
+ * only so the base room can share the canonical tally without a second ruleset.
+ */
 export function weightedVoteCounts(state: GameState): Record<string, number> {
   const counts: Record<string, number> = {};
+  const valid = new Set(livingPlayers(state.players).filter((p) => !p.kickedAt).map((p) => p.id));
   for (const [voterId, targetId] of Object.entries(state.votes)) {
-    const secondBallot = voterId.endsWith(SHERIFF_SECOND_SUFFIX);
-    const baseVoterId = secondBallot ? voterId.slice(0, -SHERIFF_SECOND_SUFFIX.length) : voterId;
-    const voter = state.players.find((p) => p.id === baseVoterId && p.alive && !p.isSpectator);
-    const target = state.players.find((p) => p.id === targetId && p.alive && !p.isSpectator);
-    if (!voter || !target) continue;
-    if (secondBallot) {
-      if (state.sheriff.sheriffId !== voter.id) continue;
-      counts[targetId] = (counts[targetId] ?? 0) + (effectiveVoteWeight(voter, target, state) > 0 ? 1 : 0);
-      continue;
-    }
-    counts[targetId] = (counts[targetId] ?? 0) + effectiveVoteWeight(voter, target, state);
-  }
-  for (const player of livingPlayers(state.players)) {
-    const raven = state.roleMemory[player.id]?.ravenVote;
-    if (typeof raven === "string" && Object.keys(state.votes).length > 0) counts[raven] = (counts[raven] ?? 0) + 1;
-    const bomb = state.roleMemory[player.id]?.bombHolder;
-    if (typeof bomb === "string" && bomb === player.id) counts[player.id] = (counts[player.id] ?? 0) + 1;
+    if (!valid.has(voterId) || !valid.has(targetId) || voterId === targetId) continue;
+    const voter = state.players.find((p) => p.id === voterId)!;
+    const target = state.players.find((p) => p.id === targetId)!;
+    const memory = state.roleMemory[voter.id] ?? {};
+    const externallyInvalid = memory.ravenInvalidVoteRound === state.round || memory.bombInvalidVoteRound === state.round;
+    const shielded = memory.berserkerVoteShieldRound === state.round;
+    if (externallyInvalid && !shielded) continue;
+    const passives = new Set(voter.role ? roleDefinition(voter.role).passives ?? [] : []);
+    if (passives.has("vote_weight_zero")) continue;
+    if (passives.has("vote_only_counts_against_non_village") && playerFaction(target) === "village") continue;
+    counts[targetId] = (counts[targetId] ?? 0) + 1;
   }
   return counts;
 }
@@ -379,11 +366,7 @@ export function weightedPluralityTarget(state: GameState): string | undefined {
 }
 
 export function areVotesComplete(state: GameState): boolean {
-  const voters = livingPlayers(state.players);
-  if (!voters.every((p) => Boolean(state.votes[p.id]))) return false;
-  const sheriffId = state.sheriff.sheriffId;
-  if (!sheriffId || !voters.some((p) => p.id === sheriffId)) return true;
-  return Boolean(state.votes[sheriffSecondVoteKey(sheriffId)]);
+  return livingPlayers(state.players).filter((p) => !p.kickedAt).every((p) => Boolean(state.votes[p.id]));
 }
 
 function roleSpecificActionAvailable(player: Player, state: GameState, effect: RoleActionEffect): boolean {
