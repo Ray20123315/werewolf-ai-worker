@@ -1,3 +1,7 @@
+html, body { min-height: 100%; height: auto !important; overflow-x: hidden; overflow-y: auto !important; }
+body { min-height: 100dvh; overscroll-behavior-y: auto; -webkit-overflow-scrolling: touch; }
+.admin-shell, .admin-dashboard { height: auto !important; max-height: none !important; overflow: visible !important; }
+
 .admin-toolkit-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: -2px 0 10px; }
 .admin-toolkit-actions .button { min-height: 34px; padding: 0 10px; font-size: .72rem; }
 .admin-diagnostic-meta { display: block; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(35,29,24,.12); font: 700 .64rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
@@ -5,6 +9,16 @@
 .admin-diagnostic-meta.severity-error { color: var(--accent); }
 .admin-diagnostic-meta.severity-warning { color: var(--warning); }
 .admin-diagnostic-meta.severity-info { color: var(--muted); }
+.admin-player-role-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.admin-role-chip { display: inline-flex; align-items: center; max-width: 100%; padding: 3px 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper-2); color: var(--muted); font-size: .64rem; font-weight: 750; overflow-wrap: anywhere; }
+.admin-role-chip.primary { color: var(--accent); border-color: #d9aaa4; background: #fff6f4; }
+.admin-role-chip.faction { color: var(--ink); }
+.admin-disband-button { color: #fff !important; border-color: var(--danger) !important; background: var(--danger) !important; }
+.admin-disband-button:hover:not(:disabled) { filter: brightness(.92); }
+
+@media (max-width: 900px) {
+  .admin-side { overflow: visible !important; max-height: none !important; }
+}
 @media (max-width: 680px) {
   .admin-toolkit-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .admin-toolkit-actions .button { width: 100%; min-width: 0; }
