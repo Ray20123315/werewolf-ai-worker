@@ -5,6 +5,7 @@ import type {
   NightActions,
   Player,
   Role,
+  RoleActionEffect,
   RoleActionPrompt,
   RoleSetup,
   Team,
@@ -170,8 +171,6 @@ export function checkWinner(players: Player[]): Team | undefined {
     return opponents.length === 0 ? "werewolf" : undefined;
   }
 
-  // Prefer immutable opening-edge metadata captured immediately after role assignment.
-  // Falling back to current roles preserves compatibility with older saved rooms/tests.
   const currentVillage = activePlayers(players).filter((p) => p.role && roleDefinition(p.role).faction === "village");
   const currentCivilians = currentVillage.filter(isVillageCivilian);
   const currentGods = currentVillage.filter((p) => !isVillageCivilian(p));
@@ -277,6 +276,7 @@ export function roleActionPrompt(player: Player, state: GameState): RoleActionPr
   if (state.roleMemory[player.id]?.disabledPermanently === true) return undefined;
   const disabledUntil = state.roleMemory[player.id]?.disabledUntilRound;
   if (typeof disabledUntil === "number" && disabledUntil >= state.round) return undefined;
+  if (!roleSpecificActionAvailable(player, state, action.effect)) return undefined;
   return {
     role: player.role,
     timing: action.timing,
@@ -384,4 +384,27 @@ export function areVotesComplete(state: GameState): boolean {
   const sheriffId = state.sheriff.sheriffId;
   if (!sheriffId || !voters.some((p) => p.id === sheriffId)) return true;
   return Boolean(state.votes[sheriffSecondVoteKey(sheriffId)]);
+}
+
+function roleSpecificActionAvailable(player: Player, state: GameState, effect: RoleActionEffect): boolean {
+  switch (effect) {
+    case "kill_if_hive_dead":
+      return state.players.some((candidate) => candidate.role === "hive" && !candidate.alive && !candidate.isSpectator);
+    case "convert_to_werewolf_if_last": {
+      const wolves = livingPlayers(state.players).filter((candidate) => !candidate.kickedAt && playerFaction(candidate) === "werewolf");
+      return wolves.length === 1 && wolves[0]?.id === player.id;
+    }
+    case "kill_if_no_wolves":
+      return !livingPlayers(state.players).some((candidate) => !candidate.kickedAt && playerFaction(candidate) === "werewolf");
+    case "cooldown_kill":
+      return state.round % 2 === 0;
+    case "necromancer_milestone": {
+      const dead = activePlayers(state.players).filter((candidate) => !candidate.kickedAt && !candidate.alive).length;
+      return state.initialPlayerCount > 0 && dead / state.initialPlayerCount >= 0.25;
+    }
+    case "alchemist_sequence":
+      return Number(state.roleMemory[player.id]?.alchemistStage ?? 0) < 3;
+    default:
+      return true;
+  }
 }
