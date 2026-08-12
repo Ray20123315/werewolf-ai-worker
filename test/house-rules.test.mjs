@@ -265,9 +265,11 @@ test("wolf kill leader prefers wolf-king style roles before ordinary wolves", ()
   assert.match(source, /return Boolean\(leaderId && actor\.id === leaderId\)/);
 });
 
-test("sheriff pseudo-ballot memory is cleaned after vote settlement", () => {
+test("house rules no longer implement a sheriff second ordinary ballot", () => {
   const source = readFileSync(new URL("../src/house-rules.ts", import.meta.url), "utf8");
-  assert.match(source, /proto\.finishVote = function/);
-  assert.match(source, /key\.endsWith\(suffix\)/);
-  assert.match(source, /delete state\.roleMemory\[key\]/);
+  assert.doesNotMatch(source, /sheriffSecondVoteKey/);
+  assert.doesNotMatch(source, /::sheriff2/);
+  assert.doesNotMatch(source, /proto\.castVoteById = function/);
+  assert.doesNotMatch(source, /proto\.finishVote = function/);
+  assert.doesNotMatch(source, /\$\{first\}\|\$\{second\}/);
 });
