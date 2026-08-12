@@ -1,6 +1,7 @@
 import "./core-role-text.js";
 import { installCoreFakeDeathRules } from "./core-fake-death.js";
 import { installCoreIntegrityRules } from "./core-integrity.js";
+import { installCoreMagicianRules } from "./core-magician.js";
 import { installCorePhaseAIRules } from "./core-phase-ai.js";
 import { installCoreRelationshipRules } from "./core-relationships.js";
 import { installCoreStateRules } from "./core-state.js";
@@ -16,6 +17,7 @@ export {
   exactDuplicateCoreSkills
 } from "./core-state.js";
 export { canonicalReactionResume, coreActionAvailable, coreActionOptions, normalizeDebateCursor } from "./core-integrity.js";
+export { magicianPrompt, resolveMagicianBySource } from "./core-magician.js";
 
 export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> & { __coreRulesInstalled?: boolean } }): void {
   const proto = GameRoomCtor.prototype;
@@ -27,4 +29,5 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
   installCoreIntegrityRules(GameRoomCtor);
   installCoreTerminalRules(GameRoomCtor);
   installCoreFakeDeathRules(GameRoomCtor);
+  installCoreMagicianRules(GameRoomCtor);
 }
