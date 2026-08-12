@@ -1,4 +1,5 @@
 import "./core-role-text.js";
+import { installCoreAuditHardeningRules } from "./core-audit-hardening.js";
 import { installCoreFakeDeathRules } from "./core-fake-death.js";
 import { installCoreIntegrityRules } from "./core-integrity.js";
 import { installCoreMagicianRules } from "./core-magician.js";
@@ -30,4 +31,7 @@ export function installCoreRules(GameRoomCtor: { prototype: Record<string, any> 
   installCoreTerminalRules(GameRoomCtor);
   installCoreFakeDeathRules(GameRoomCtor);
   installCoreMagicianRules(GameRoomCtor);
+  if (typeof proto.systemMem === "function" && typeof proto.mem === "function" && typeof proto.touchAndSave === "function") {
+    installCoreAuditHardeningRules(GameRoomCtor as unknown as Parameters<typeof installCoreAuditHardeningRules>[0]);
+  }
 }
