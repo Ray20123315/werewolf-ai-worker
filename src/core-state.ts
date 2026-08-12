@@ -51,9 +51,15 @@ export function exactDuplicateCoreSkills(): Array<{ roles: string[]; signature: 
 export function coreWinner(state: GameState): ReturnType<typeof checkWinner> {
   const alive = formalLiving(state);
   if (!alive.length) return undefined;
+  const wolves = alive.filter((player) => playerFaction(player) === "werewolf").length;
+  const redAxes = alive.filter((player) => player.role === "red_axe_madman");
+  // Red Axe is explicitly a post-wolf endgame role. Base checkWinner() would
+  // otherwise award Village/Spirit immediately when wolves reach zero.
+  if (wolves === 0 && redAxes.length) {
+    return alive.every((player) => player.role === "red_axe_madman") ? "neutral" : undefined;
+  }
   const base = checkWinner(state.players);
   if (base && base !== "werewolf") return base;
-  const wolves = alive.filter((player) => playerFaction(player) === "werewolf").length;
   if (!wolves) return base;
   const settings = state.settings as RuntimeSettings;
   if (settings.winCondition === "slaughter_all") {
