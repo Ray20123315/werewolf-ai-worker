@@ -155,12 +155,7 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
     const voter = validExilePlayers(state).find((player) => player.id === voterId);
     if (!voter) throw new Error("投票玩家無效");
     const voterMemory = this.mem(state, voter.id) as Record<string, any>;
-    const externallyInvalid = voterMemory.ravenInvalidVoteRound === state.round || voterMemory.bombHolder === voter.id;
-    const bonus = Number(voterMemory.voteBonus ?? 0);
-    if (voter.role === "berserker_wolf" && externallyInvalid && bonus > 0) {
-      voterMemory.voteBonus = bonus - 1;
-      voterMemory.berserkerVoteShieldRound = state.round;
-    } else delete voterMemory.berserkerVoteShieldRound;
+    delete voterMemory.berserkerVoteShieldRound;
 
     if (targetId === ABSTAIN_TARGET || targetId === AUTO_SKIP_TARGET) {
       state.votes[voter.id] = targetId;
@@ -168,6 +163,14 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
       const target = validExilePlayers(state).find((player) => player.id === targetId);
       if (!target) throw new Error("投票目標無效");
       if (voter.id === target.id) throw new Error("不能投給自己");
+
+      const externallyInvalid = voterMemory.ravenInvalidVoteRound === state.round || voterMemory.bombHolder === voter.id;
+      const bonus = Number(voterMemory.voteBonus ?? 0);
+      if (voter.role === "berserker_wolf" && externallyInvalid && bonus > 0) {
+        voterMemory.voteBonus = bonus - 1;
+        voterMemory.berserkerVoteShieldRound = state.round;
+      }
+
       if (voterMemory.bombHolder === voter.id) {
         voterMemory.bombInvalidVoteRound = state.round;
         delete voterMemory.bombHolder;
