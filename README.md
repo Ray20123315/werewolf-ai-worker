@@ -72,7 +72,7 @@ Durable Object alarm 是 phase deadline 的權威來源。白天逾時會自動�
 
 ### 一人一票下的角色適配
 
-- **抖M教徒**：普通放逐票固定為無效票；成為唯一最高票時仍可觸發其特殊勝利。
+- **抖M（附加身份）**：本人普通放逐仍是正常 **1 張票**；抖M的特殊性在自身被一般放逐時的個人勝利條件，不採用舊版「本人投票無效」。
 - **辨別者**：投給好人陣營時該票無效。
 - **烏鴉**：使目標翌日普通放逐票無效，不再新增額外票數。
 - **炸彈狼**：炸彈持有者下一次實際投票時該票無效，且炸彈會傳給其投票目標；不再製造額外票數。
@@ -101,10 +101,10 @@ Legacy weighted-vote、PK/revote 與警長第二張普通放逐票的 helper 只
 - **Red Axe Madman**：狼人全滅後仍可合法延續遊戲，因此一般「狼人為 0 → 村莊／怨靈勝」不能在它仍可行動時提前截斷對局。
 - **Suicide Bomber**：白天自爆可指定 0～2 名其他存活玩家；若爆炸後場上沒有其他存活正式玩家，由炸彈客取得個人特殊勝利。
 
-### 假死與交換生死
+### 假死與魔術師
 
 - **Fake Killer** 的假死是獨立狀態，不呼叫真死亡 pipeline，因此不會錯觸 Hunter 開槍、戀人殉情、警長繼任等真死亡副作用；下一輪自動恢復。
-- **Magician**：一死一活時使用正式死亡／復活 invariant 交換生死；兩人都活時交換角色；兩人都死時不做角色交換。
+- **Magician**：每局一次選兩名其他玩家；一名真正死亡、一名仍屬存活狀態時，以正式死亡／復活 invariant 交換生死；兩人都活且在白天（Debate／Vote）時交換目前普通投票；其他有效情況（例如兩人都活但在夜晚、或兩人都真正死亡）交換職業與 `factionOverride`／勝利陣營歸屬。不能選自己。
 
 ---
 
@@ -223,6 +223,8 @@ src/
 ├─ core-phase-ai.ts        # phase timer / AI wolf council / Hunter last words
 ├─ core-integrity.ts       # phase/reaction/night/action cross-layer invariants
 ├─ core-terminal.ts        # final canonical terminal gate
+├─ core-fake-death.ts      # fake-death vs true-death prerequisite invariants
+├─ core-magician.ts        # final Word-source Magician semantics
 ├─ core-role-text.ts       # product text aligned with canonical runtime
 └─ chat-channels.ts        # installs the composed runtime
 ```
