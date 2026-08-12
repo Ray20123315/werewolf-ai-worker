@@ -96,7 +96,7 @@ test("redirected Guard target is revalidated against original target legality", 
   assert.equal(room.guardAtBase.g, undefined);
 });
 
-test("effective action snapshot exposes core action targets and drives Shadow Wolf", () => {
+test("effective action observation includes core targets and drives Shadow Wolf", () => {
   class Room extends Base() {
     finishNight(st) {
       for (const [id, action] of Object.entries(st.nightActions.roleActions)) {
@@ -121,6 +121,26 @@ test("effective action snapshot exposes core action targets and drives Shadow Wo
   assert.match(st.roleResults.d["d:s"], /inspect_team/);
   assert.match(st.roleResults.d["d:s"], /V/);
   assert.equal(victim.alive, false);
+});
+
+test("disabled pre-stage raw submission is not an effective Shadow target source", () => {
+  class Room extends Base() {
+    finishNight(st) {
+      st.roleMemory.w = { disabledUntilRound: st.round };
+      const shadow = st.players.find((p) => p.id === "x");
+      this.resolveNightRoleAction(st, shadow, st.nightActions.roleActions.x);
+    }
+    resolveNightRoleAction() {}
+    killPlayer(st, id) { const p = st.players.find((x) => x.id === id && x.alive); if (!p) return false; p.alive = false; return true; }
+  }
+  install(Room);
+  const wind = player("w", "wind_wolf"), shadow = player("x", "shadow_wolf"), victim = player("v", "villager");
+  const st = state([wind, shadow, victim]);
+  st.nightActions.roleActions.w = { effect: "redirect_targeted_action", targetIds: [victim.id], submittedAt: 1 };
+  st.nightActions.roleActions.x = { effect: "kill_if_targeted_by_other", targetIds: [victim.id], submittedAt: 2 };
+  const room = new Room();
+  room.finishNight(st);
+  assert.equal(victim.alive, true);
 });
 
 test("Hacker reroll stays inside canonical active non-addon role pool", () => {
@@ -217,7 +237,7 @@ test("Vampire Wolf copied ability blocks night completion until submitted and ex
   assert.equal(st.roleMemory.x.copiedRole, undefined);
 });
 
-test("AI Elder strong_kill normalizes to immediate dawn and cancels remaining night submissions", () => {
+test("Elder strong_kill submission immediately kills target and terminates the remaining night", () => {
   class Room extends Base() {
     submitRoleActionInternal() { this.baseSubmit = true; }
     finishNight(st) { this.baseNight = structuredClone(st.nightActions); }
@@ -227,18 +247,42 @@ test("AI Elder strong_kill normalizes to immediate dawn and cancels remaining ni
   install(Room);
   const elder = player("e", "elder_wolf"), victim = player("v", "villager"), seer = player("s", "seer");
   const st = state([elder, victim, seer], "night", 2);
+  st.nightActions.seerTargets.s = elder.id;
   const room = new Room();
   room.submitRoleActionInternal(st, elder, "strong_kill", [victim.id]);
-  assert.equal(st.nightActions.roleActions.e.effect, "elder_force_dawn");
-  st.nightActions.seerTargets.s = elder.id;
-  room.finishNight(st);
   assert.equal(victim.alive, false);
   assert.deepEqual(room.baseNight.seerTargets, {});
   assert.deepEqual(room.baseNight.roleActions, {});
+  assert.equal(st.nightActions.roleActions.e, undefined);
+});
+
+test("Magician winning allegiance swaps only when the night role swap actually resolves", () => {
+  class Room extends Base() {
+    submitRoleActionInternal(st, actor, effect, targetIds) { st.nightActions.roleActions[actor.id] = { effect, targetIds, submittedAt: 1 }; }
+    resolveNightRoleAction(st, _actor, action) {
+      if (action.effect !== "magician_swap") return;
+      const a = st.players.find((p) => p.id === action.targetIds[0]);
+      const b = st.players.find((p) => p.id === action.targetIds[1]);
+      [a.role, b.role] = [b.role, a.role];
+    }
+  }
+  install(Room);
+  const magician = player("m", "magician"), a = player("a", "spy"), b = player("b", "gambler");
+  const st = state([magician, a, b, player("w", "werewolf")]);
+  st.roleMemory.a = { winningAllegiance: "village" };
+  st.roleMemory.b = { winningAllegiance: "werewolf" };
+  const room = new Room();
+  room.submitRoleActionInternal(st, magician, "magician_swap", [a.id, b.id]);
+  assert.equal(st.roleMemory.a.winningAllegiance, "village");
+  assert.equal(st.roleMemory.b.winningAllegiance, "werewolf");
+  room.resolveNightRoleAction(st, magician, st.nightActions.roleActions.m);
+  assert.equal(st.roleMemory.a.winningAllegiance, "werewolf");
+  assert.equal(st.roleMemory.b.winningAllegiance, "village");
 });
 
 test("source owners contain the remaining state-lifetime primitives", () => {
   const source = fs.readFileSync("src/core-post28-repair.ts", "utf8");
+  const finalize = fs.readFileSync("src/core-post28-finalize.ts", "utf8");
   assert.match(source, /redirectWolfKillRound/);
   assert.match(source, /convertOnDeathRound/);
   assert.match(source, /dawnDeathQueue/);
@@ -246,4 +290,7 @@ test("source owners contain the remaining state-lifetime primitives", () => {
   assert.match(source, /nextActionOrVoteDisabledCount/);
   assert.match(source, /activeCoreRoleDefinitions\(\)/);
   assert.match(source, /copiedSourceId/);
+  assert.match(finalize, /resolveElderImmediately/);
+  assert.match(finalize, /wolfPerception/);
+  assert.match(finalize, /swapWinningAllegiances/);
 });
