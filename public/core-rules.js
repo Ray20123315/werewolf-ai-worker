@@ -26,16 +26,19 @@
       submitCupid: "確認配對",
       loverGroup: "你的戀人群組",
       pairedByCupid: "本局配對",
+      suicideTitle: "自殺炸彈",
+      suicideHelp: "可指定 0～2 名其他存活玩家；不必硬選滿兩人。",
+      submitSuicide: "引爆",
       winEdge: "屠邊：無怨靈、狼人仍存活且好人方只剩 1 人時，狼人勝",
       winAll: "屠城：狼人必須讓所有其他陣營出局才勝",
       winHelp: "屠邊依目前存活狀態判定；屠城必須清空全部非狼人陣營。",
       skillTiming: "時機"
     },
     "zh-CN": {
-      fool: "启用蠢蛋（每名正式玩家独立 25% 概率）", loverSize: "每组 CP 人数", dayMinutes: "白天时间（分钟）", nightMinutes: "夜晚时间（分钟）", timer: "剩余时间", noLimit: "未计时", ownRole: "你的角色技能", noActiveSkill: "此角色没有主动技能", foolYou: "你本局是蠢蛋", normalYou: "你本局不是蠢蛋", abstain: "弃票／跳过投票", voteSummary: "上一轮投票", abstentions: "弃票", invalidVotes: "无效票", hunterLastWords: "猎人遗言", hunterPlaceholder: "留下最后一句话……", sendLastWords: "送出遗言", cupidTitle: "丘比特配对", cupidHelp: "请勾选刚好指定人数；同一玩家不能同时属于两组 CP。", submitCupid: "确认配对", loverGroup: "你的恋人群组", pairedByCupid: "本局配对", winEdge: "屠边：无怨灵、狼人仍存活且好人方只剩 1 人时，狼人胜", winAll: "屠城：狼人必须让所有其他阵营出局才胜", winHelp: "屠边依当前存活状态判定；屠城必须清空全部非狼人阵营。", skillTiming: "时机"
+      fool: "启用蠢蛋（每名正式玩家独立 25% 概率）", loverSize: "每组 CP 人数", dayMinutes: "白天时间（分钟）", nightMinutes: "夜晚时间（分钟）", timer: "剩余时间", noLimit: "未计时", ownRole: "你的角色技能", noActiveSkill: "此角色没有主动技能", foolYou: "你本局是蠢蛋", normalYou: "你本局不是蠢蛋", abstain: "弃票／跳过投票", voteSummary: "上一轮投票", abstentions: "弃票", invalidVotes: "无效票", hunterLastWords: "猎人遗言", hunterPlaceholder: "留下最后一句话……", sendLastWords: "送出遗言", cupidTitle: "丘比特配对", cupidHelp: "请勾选刚好指定人数；同一玩家不能同时属于两组 CP。", submitCupid: "确认配对", loverGroup: "你的恋人群组", pairedByCupid: "本局配对", suicideTitle: "自杀炸弹", suicideHelp: "可指定 0～2 名其他存活玩家；不必强制选满两人。", submitSuicide: "引爆", winEdge: "屠边：无怨灵、狼人仍存活且好人方只剩 1 人时，狼人胜", winAll: "屠城：狼人必须让所有其他阵营出局才胜", winHelp: "屠边依当前存活状态判定；屠城必须清空全部非狼人阵营。", skillTiming: "时机"
     },
     en: {
-      fool: "Enable Fool modifier (independent 25% chance per active player)", loverSize: "Players per CP group", dayMinutes: "Day limit (minutes)", nightMinutes: "Night limit (minutes)", timer: "Time left", noLimit: "No timer", ownRole: "Your role ability", noActiveSkill: "This role has no active ability", foolYou: "You are a Fool this game", normalYou: "You are not a Fool this game", abstain: "Abstain / skip vote", voteSummary: "Previous vote", abstentions: "Abstentions", invalidVotes: "Invalid votes", hunterLastWords: "Hunter last words", hunterPlaceholder: "Leave your final message…", sendLastWords: "Send last words", cupidTitle: "Cupid link", cupidHelp: "Select exactly the configured group size. A player cannot belong to two CP groups.", submitCupid: "Confirm group", loverGroup: "Your lover group", pairedByCupid: "Cupid group", winEdge: "Edge: with no spirits, wolves alive, and at most 1 village player left, wolves win", winAll: "Full elimination: wolves must eliminate every other faction", winHelp: "Edge uses the current surviving factions. Full elimination requires no living non-wolf players.", skillTiming: "Timing"
+      fool: "Enable Fool modifier (independent 25% chance per active player)", loverSize: "Players per CP group", dayMinutes: "Day limit (minutes)", nightMinutes: "Night limit (minutes)", timer: "Time left", noLimit: "No timer", ownRole: "Your role ability", noActiveSkill: "This role has no active ability", foolYou: "You are a Fool this game", normalYou: "You are not a Fool this game", abstain: "Abstain / skip vote", voteSummary: "Previous vote", abstentions: "Abstentions", invalidVotes: "Invalid votes", hunterLastWords: "Hunter last words", hunterPlaceholder: "Leave your final message…", sendLastWords: "Send last words", cupidTitle: "Cupid link", cupidHelp: "Select exactly the configured group size. A player cannot belong to two CP groups.", submitCupid: "Confirm group", loverGroup: "Your lover group", pairedByCupid: "Cupid group", suicideTitle: "Suicide bomb", suicideHelp: "Choose zero, one, or two other living players; selecting two is not mandatory.", submitSuicide: "Detonate", winEdge: "Edge: with no spirits, wolves alive, and at most 1 village player left, wolves win", winAll: "Full elimination: wolves must eliminate every other faction", winHelp: "Edge uses the current surviving factions. Full elimination requires no living non-wolf players.", skillTiming: "Timing"
     }
   };
 
@@ -117,14 +120,14 @@
       .core-own-role { border-left:3px solid #665c76; }
       .core-fool-chip { display:inline-flex; margin-top:7px; padding:3px 7px; border-radius:999px; background:#f0e8cb; color:#6f571b; font-size:9px; font-weight:800; }
       .core-lover-chip { display:inline-flex; margin-left:5px; padding:3px 6px; border-radius:999px; background:#f1edf8; color:#51465f; font-size:8px; font-weight:800; }
-      .core-cupid-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:10px; }
-      .core-cupid-grid label { display:flex; align-items:center; gap:7px; margin:0; padding:8px; border:1px solid var(--line); border-radius:9px; background:#fff; }
-      .core-cupid-grid input { width:auto; }
+      .core-cupid-grid, .core-suicide-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:10px; }
+      .core-cupid-grid label, .core-suicide-grid label { display:flex; align-items:center; gap:7px; margin:0; padding:8px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+      .core-cupid-grid input, .core-suicide-grid input { width:auto; }
       .core-vote-summary { margin-bottom:10px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#f7f4ef; font-size:10px; line-height:1.55; }
       .core-vote-summary strong { display:block; margin-bottom:4px; font-size:11px; }
       #coreAbstainVote { margin-left:8px; }
       .core-last-words { margin-top:10px; }
-      @media(max-width:680px){ .core-settings-grid,.core-cupid-grid{grid-template-columns:1fr;} .core-fool-row{grid-column:auto;} #coreAbstainVote{margin:8px 0 0;width:100%;} }
+      @media(max-width:680px){ .core-settings-grid,.core-cupid-grid,.core-suicide-grid{grid-template-columns:1fr;} .core-fool-row{grid-column:auto;} #coreAbstainVote{margin:8px 0 0;width:100%;} }
     `;
     document.head.append(style);
   }
@@ -271,6 +274,21 @@
     });
   }
 
+  function ensureSuicideBombAction() {
+    if (!latestState?.roleAction || latestState.roleAction.effect !== "suicide_bomb" || latestState.roleActionSubmitted) return;
+    const button = document.querySelector("#roleActionButton");
+    const old = button?.closest(".role-skill");
+    if (!old || old.dataset.coreSuicide === "1") return;
+    const eligible = (latestState.players || []).filter((p) => p.alive && !p.isSpectator && p.id !== latestState.me?.id);
+    old.dataset.coreSuicide = "1";
+    old.innerHTML = `<div><span class="skill-label">${escapeHtml(t("suicideTitle"))}</span><strong>${escapeHtml(t("suicideTitle"))}</strong><p>${escapeHtml(t("suicideHelp"))}</p></div><div class="core-suicide-grid">${eligible.map((p) => `<label><input type="checkbox" data-core-suicide-target="${escapeAttr(p.id)}" /><span data-no-translate>${escapeHtml(p.name)}</span></label>`).join("")}</div><button id="coreSuicideSubmit" class="button button-secondary" type="button">${escapeHtml(t("submitSuicide"))}</button>`;
+    old.querySelector("#coreSuicideSubmit")?.addEventListener("click", () => {
+      const ids = [...old.querySelectorAll("[data-core-suicide-target]:checked")].map((input) => input.dataset.coreSuicideTarget);
+      if (ids.length > 2) return showToast(t("suicideHelp"), true);
+      if (!send({ type: "role_action", effect: "suicide_bomb", targetIds: ids })) showToast("WebSocket 尚未連線", true);
+    });
+  }
+
   function ensureAbstain() {
     document.querySelector("#coreAbstainVote")?.remove();
     if (latestState?.phase !== "vote" || (latestState.votesCast || []).includes(latestState.me?.id)) return;
@@ -339,6 +357,7 @@
     ensureOwnRoleCard();
     ensureLoverGroupUi();
     ensureCupidAction();
+    ensureSuicideBombAction();
     ensureAbstain();
     ensureVoteSummary();
     ensureHunterLastWords();
