@@ -67,8 +67,12 @@ test("Spy/Gambler winning allegiance is not their mechanical faction", () => {
   assert.equal(room.participatesWolfVote(st, spy), false);
 });
 
-test("hidden wolf passives, Lurking wake-up and Wise list semantics are observable", () => {
-  class Room extends MemoryBase() { wolfTeammates() { return []; } }
+test("wolf-list perception can be fooled while secret authorization remains mechanical-only", () => {
+  class Room extends MemoryBase() {
+    wolfTeammates() { return []; }
+    projectState() { return { me: {} }; }
+    aiSystemPrompt() { return "base"; }
+  }
   install(Room);
   const wolf = player("w", "werewolf");
   const wise = player("q", "wise_wolf");
@@ -77,13 +81,22 @@ test("hidden wolf passives, Lurking wake-up and Wise list semantics are observab
   const fraud = player("f", "fraudster");
   const st = state([wolf, wise, disguise, lurking, fraud]);
   const room = new Room();
-  assert.deepEqual(new Set(room.wolfTeammates(st, wolf).map((p) => p.id)), new Set(["q", "f"]));
+
+  // Secret authorization is always real mechanical wolves only.
+  assert.deepEqual(new Set(room.wolfTeammates(st, wolf).map((p) => p.id)), new Set(["q"]));
   assert.deepEqual(new Set(room.wolfTeammates(st, wise).map((p) => p.id)), new Set(["w"]));
   assert.deepEqual(room.wolfTeammates(st, disguise), []);
   assert.deepEqual(room.wolfTeammates(st, lurking), []);
+
+  // Perceived list is what the player sees: ordinary wolf can be fooled by Fraudster; Wise cannot.
+  assert.deepEqual(new Set(room.projectState(st, wolf.token).me.wolfTeammates), new Set(["q", "f"]));
+  assert.deepEqual(new Set(room.projectState(st, wise.token).me.wolfTeammates), new Set(["w"]));
+  assert.deepEqual(room.projectState(st, disguise.token).me.wolfTeammates, []);
+
   st.roleMemory.l = { awake: true };
   assert.ok(room.wolfTeammates(st, wolf).some((p) => p.id === "l"));
   assert.ok(room.wolfTeammates(st, lurking).some((p) => p.id === "w"));
+  assert.ok(room.projectState(st, wolf.token).me.wolfTeammates.includes("l"));
 });
 
 test("AI council skips a hidden wolf before returning a visible all-AI cohort", () => {
