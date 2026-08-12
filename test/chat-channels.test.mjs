@@ -139,8 +139,8 @@ test("frontend channel controller shows viewer-private relationship feedback wit
 });
 
 test("generic speech and skill cards are neutral while relationship badges use separate semantics", () => {
-  const css = readFileSync(new URL("../public/room-toolkit.css", import.meta.url), "utf8");
-  assert.match(css, /\.message-speech, \.role-skill \{ border-left-color: var\(--line\) !important; \}/);
+  const css = readFileSync(new URL("../public/ui-fixes.css", import.meta.url), "utf8");
+  assert.match(css, /\.message-speech,\s*\.role-skill \{ border-left-color: var\(--line\) !important; \}/);
   assert.match(css, /\.pill\.private-relationship\.lover-private/);
   assert.match(css, /\.pill\.private-relationship\.cupid-private/);
 });

@@ -9,7 +9,7 @@ function source(relative) {
 }
 
 test("compact UI scripts pass browser syntax checks", () => {
-  for (const relative of ["../public/static-copy.js", "../public/compact-ui.js", "../public/ui-runtime-repair.js"]) {
+  for (const relative of ["../public/static-copy.js", "../public/compact-ui.js", "../public/private-inspection.js", "../public/ui-runtime-repair.js"]) {
     const path = fileURLToPath(new URL(relative, import.meta.url));
     const result = spawnSync(process.execPath, ["--check", path], { encoding: "utf8" });
     assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
@@ -66,22 +66,34 @@ test("remaining fixed labels use repository-owned static translations", () => {
   assert.match(admin, /src="\/ui-fixes\.js"/);
 });
 
-test("room display mode is an explicit working control with materially different compact behavior", () => {
+test("desktop room is a single viewport with only core controls", () => {
   const html = source("../public/index.html");
+  const css = source("../public/compact-ui.css");
   const repair = source("../public/ui-runtime-repair.js");
+  const inspection = source("../public/private-inspection.js");
 
-  assert.match(html, /src="\/room-toolkit\.js"><\/script>\s*<script src="\/ui-runtime-repair\.js"><\/script>/s);
-  assert.match(repair, /button\.addEventListener\("click"/);
-  assert.match(repair, /localStorage\.setItem\(MODE_KEY, enabled \? "1" : "0"\)/);
-  assert.match(repair, /aria-pressed/);
-  assert.match(repair, /目前：一般模式/);
-  assert.match(repair, /目前：精簡模式/);
-  assert.match(repair, /切換一般模式/);
-  assert.match(repair, /切換精簡模式/);
-  assert.match(repair, /\.room-compact-mode #roomPlayerTools/);
-  assert.match(repair, /\.room-compact-mode #roomMessageTools/);
-  assert.match(repair, /\.room-compact-mode \.room-quick-tools > \.room-toolkit-stat/);
-  assert.match(repair, /pointer-events: auto !important/);
+  assert.match(html, /src="\/private-inspection\.js"><\/script>\s*<script src="\/ui-runtime-repair\.js"><\/script>/s);
+  assert.doesNotMatch(html, /class="hero panel"/);
+  assert.doesNotMatch(html, /class="mode-chip"/);
+  assert.doesNotMatch(html, /class="button button-ghost admin-link"/);
+  assert.doesNotMatch(html, /room-toolkit\.(?:css|js)/);
+  assert.match(css, /body:has\(#game:not\(\.hidden\)\) \{ overflow: hidden; \}/);
+  assert.match(css, /height:\s*100dvh/);
+  assert.match(css, /#game \.action-area \{ min-height:\s*0; overflow:\s*auto;/);
+  assert.match(css, /#game \.players \{ flex:\s*1 1 auto; min-height:\s*0; max-height:\s*none; \}/);
+  assert.doesNotMatch(repair, /roomCompactToggle|MODE_KEY|MODE_CLASS|room-compact-mode/);
+  assert.match(inspection, /function refreshPrivateInspections\(\)/);
+});
+
+test("core form and room text use readable desktop sizes", () => {
+  const styles = source("../public/styles.css");
+  const compact = source("../public/compact-ui.css");
+
+  assert.match(styles, /label \{[^}]*font-size:\s*15px;/);
+  assert.match(styles, /input, select, textarea \{[^}]*font-size:\s*15px;/);
+  assert.match(styles, /\.message p \{[^}]*font-size:\s*15px;/);
+  assert.match(styles, /\.player-name strong \{ font-size:\s*15px; \}/);
+  assert.match(compact, /#game \.action-area:has\(#debateSpeech\)/);
 });
 
 test("fixed copy stays local while auto-detected player text still reaches live translation", () => {

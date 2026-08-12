@@ -73,38 +73,22 @@ test("admin async form lifecycle fix keeps a stable form reference across await"
   assert.doesNotMatch(toolkit, /event\.currentTarget\.reset\(\)/);
 });
 
-test("room frontend toolkit provides at least ten useful room functions", () => {
+test("room frontend removes secondary toolbars while preserving private inspection", () => {
   const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
-  const toolkit = readFileSync(new URL("../public/room-toolkit.js", import.meta.url), "utf8");
-  const css = readFileSync(new URL("../public/room-toolkit.css", import.meta.url), "utf8");
-  execFileSync(process.execPath, ["--check", new URL("../public/room-toolkit.js", import.meta.url).pathname]);
+  const inspection = readFileSync(new URL("../public/private-inspection.js", import.meta.url), "utf8");
+  const compact = readFileSync(new URL("../public/compact-ui.css", import.meta.url), "utf8");
+  execFileSync(process.execPath, ["--check", new URL("../public/private-inspection.js", import.meta.url).pathname]);
 
-  assert.match(html, /room-toolkit\.css/);
-  assert.match(html, /room-toolkit\.js/);
-  const capabilities = [
-    "roomPlayerSearch",
-    "roomPlayerFilter",
-    "roomPlayerSort",
-    "roomPlayerClear",
-    "roomMessageSearch",
-    "roomMessageFilter",
-    "roomJumpLatest",
-    "roomCopyCode",
-    "roomShare",
-    "roomCompactToggle",
-    "roomConnectionCheck",
-    "roomFormalCount",
-    "roomAliveCount",
-    "roomAICount",
-    "roomSpectatorCount",
-    "roomLastSync"
-  ];
-  for (const capability of capabilities) assert.match(toolkit, new RegExp(capability));
-  assert.ok(capabilities.length >= 10);
-  assert.match(toolkit, /navigator\.share/);
-  assert.match(toolkit, /MutationObserver/);
-  assert.match(css, /room-compact-mode/);
-  assert.match(css, /@media \(max-width: 680px\)/);
+  assert.doesNotMatch(html, /room-toolkit\.(?:css|js)/);
+  assert.match(html, /private-inspection\.js/);
+  for (const removed of ["roomPlayerSearch", "roomMessageSearch", "roomQuickTools", "roomCompactToggle", "roomConnectionCheck"]) {
+    assert.doesNotMatch(inspection, new RegExp(removed));
+  }
+  assert.match(inspection, /function refreshPrivateInspections\(\)/);
+  assert.match(inspection, /pill private-inspection/);
+  assert.match(inspection, /MutationObserver/);
+  assert.match(compact, /height:\s*100dvh/);
+  assert.match(compact, /#game \.messages \{ flex:\s*1 1 auto; min-height:\s*0; max-height:\s*none; \}/);
 });
 
 test("backend diagnostics return actionable activity severity signature and burst metadata", () => {

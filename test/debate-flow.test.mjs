@@ -123,11 +123,10 @@ test("browser flow only exposes formal speech to the current speaker and locks g
   assert.match(repair, /一般聊天已暫停/);
 });
 
-test("night action copy separates submitted choices from resolved outcomes", () => {
+test("night action copy separates submitted choices from outcomes without a duplicate notice", () => {
   const repair = readFileSync(new URL("../public/ui-runtime-repair.js", import.meta.url), "utf8");
-  assert.match(repair, /技能提交只代表送出選擇/);
-  assert.match(repair, /送出目標不等於已經擊殺/);
   assert.match(repair, /提交目標（尚未結算）/);
   assert.match(repair, /狼隊目標已提交，等待夜間結算/);
   assert.match(repair, /提交技能選擇（尚未結算）/);
+  assert.doesNotMatch(repair, /skillSubmissionNotice|flow-clarity-note/);
 });

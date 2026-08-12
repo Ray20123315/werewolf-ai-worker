@@ -47,7 +47,7 @@
   content: "▾";
   margin-right: 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   transition: transform .15s ease;
 }
 .role-group-head strong { margin-right: auto; }
@@ -61,10 +61,29 @@
   border-radius: 999px;
   color: var(--danger);
   background: #fff0ed;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.35;
 }
+
+/* Red is reserved for danger and wolf semantics; generic speech and skills stay neutral. */
+.message-speech,
+.role-skill { border-left-color: var(--line) !important; }
+.private-relationship-notice {
+  margin: 0 0 9px;
+  padding: 9px 11px;
+  border: 1px solid #cbc4dc;
+  border-left: 3px solid #77668f;
+  border-radius: 10px;
+  color: #51465f;
+  background: #f6f3fb;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+.pill.private-relationship { border: 1px solid transparent; font-weight: 800; }
+.pill.private-relationship.lover-private { color: #51465f; background: #f1edf8; border-color: #cbc4dc; }
+.pill.private-relationship.cupid-private { color: #36546a; background: #edf5f8; border-color: #bfd0d8; }
 
 @media (max-width: 820px) {
   .chat-form { grid-template-columns: minmax(105px, 140px) minmax(0, 1fr) auto; }

@@ -21,6 +21,8 @@ test("flow clarity observer is scoped to the action area and ignores text churn"
     /observer\.observe\(document\.body, \{ childList: true, subtree: true, characterData: true \}\);/,
     "flow repair must not observe every timer/sync text mutation on the page"
   );
+  assert.doesNotMatch(repair, /observer\.observe\(document\.body/);
+  assert.doesNotMatch(repair, /roomCompactToggle|room-compact-mode/);
 });
 
 test("freeze hotfix preserves debate flow clarity and pending-resolution wording", () => {

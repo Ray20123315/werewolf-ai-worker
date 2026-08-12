@@ -13,7 +13,7 @@ const publicScripts = [
   "../public/chat-channels.js",
   "../public/ai-form.js",
   "../public/house-rules.js",
-  "../public/room-toolkit.js",
+  "../public/private-inspection.js",
   "../public/admin.js",
   "../public/admin-toolkit.js"
 ];
@@ -31,7 +31,7 @@ test("browser JavaScript files pass syntax checks", () => {
 });
 
 test("no runtime helper replaces the game's native WebSocket constructor", () => {
-  for (const relative of ["../public/ui-fixes.js", "../public/chat-channels.js", "../public/ai-form.js", "../public/house-rules.js", "../public/room-toolkit.js"]) {
+  for (const relative of ["../public/ui-fixes.js", "../public/chat-channels.js", "../public/ai-form.js", "../public/house-rules.js", "../public/private-inspection.js"]) {
     const js = source(relative);
     assert.doesNotMatch(js, /window\.WebSocket\s*=/, relative);
     assert.doesNotMatch(js, /extends\s+NativeWebSocket/, relative);
@@ -74,10 +74,11 @@ test("AI bulk join keeps the page and form state while storing keys for every cr
   assert.match(html, /id="aiBatchHint"/);
   const aiScript = html.indexOf('<script src="/ai-form.js"></script>');
   const houseScript = html.indexOf('<script src="/house-rules.js"></script>');
-  const toolkitScript = html.indexOf('<script src="/room-toolkit.js"></script>');
+  const inspectionScript = html.indexOf('<script src="/private-inspection.js"></script>');
+  const repairScript = html.indexOf('<script src="/ui-runtime-repair.js"></script>');
   const appScript = html.indexOf('<script type="module" src="/app.js"></script>');
   assert.ok(aiScript >= 0 && aiScript < houseScript, "AI capture controller must load before house-rules");
-  assert.ok(houseScript < toolkitScript && toolkitScript < appScript, "room toolkit may extend the pre-app layer without moving AI capture behind app.js");
+  assert.ok(houseScript < inspectionScript && inspectionScript < repairScript && repairScript < appScript, "private inspection and flow repair must load before app.js without moving AI capture behind house-rules");
 
   assert.match(ai, /const BATCH_MAX = 100/);
   assert.match(ai, /Array\.from\(\{ length: count \}, \(_, index\) => normalizeName\(`\$\{base\}\$\{index \+ 1\}`\)\)/);
@@ -150,21 +151,21 @@ test("fixed game translation stays local while player chat keeps the native remo
 });
 
 test("private inspection results render beside players without widening the public projection", () => {
-  const toolkit = source("../public/room-toolkit.js");
+  const inspection = source("../public/private-inspection.js");
   const room = source("../src/room.ts");
   const channels = source("../src/chat-channels.ts");
 
-  assert.match(toolkit, /function refreshPrivateInspections\(\)/);
-  assert.match(toolkit, /\/state\?token=\$\{encodeURIComponent\(session\.token\)\}/);
-  assert.match(toolkit, /inspectionView\?\.me\?\.seerResults\?\.\[player\.id\]/);
-  assert.match(toolkit, /inspectionView\?\.me\?\.roleResults \|\| \{\}/);
-  assert.match(toolkit, /pill private-inspection/);
-  assert.match(toolkit, /function factionInspectionLabel/);
-  assert.match(toolkit, /function identityResultLabel/);
-  assert.match(toolkit, /"zh-TW"/);
-  assert.match(toolkit, /"zh-CN"/);
-  assert.match(toolkit, /en:/);
-  assert.doesNotMatch(toolkit, /window\.WebSocket\s*=/);
+  assert.match(inspection, /function refreshPrivateInspections\(\)/);
+  assert.match(inspection, /\/state\?token=\$\{encodeURIComponent\(session\.token\)\}/);
+  assert.match(inspection, /inspectionView\?\.me\?\.seerResults\?\.\[player\.id\]/);
+  assert.match(inspection, /inspectionView\?\.me\?\.roleResults \|\| \{\}/);
+  assert.match(inspection, /pill private-inspection/);
+  assert.match(inspection, /function factionInspectionLabel/);
+  assert.match(inspection, /function identityResultLabel/);
+  assert.match(inspection, /"zh-TW"/);
+  assert.match(inspection, /"zh-CN"/);
+  assert.match(inspection, /en:/);
+  assert.doesNotMatch(inspection, /window\.WebSocket\s*=/);
 
   assert.match(room, /const seerResults = state\.seerResults\[me\.id\]/);
   assert.match(room, /state\.roleResults\[me\.id\]/);
