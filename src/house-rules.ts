@@ -1,5 +1,5 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
-import { activePlayers, areVotesComplete, canWitchSelfSave, isVillageCivilian, livingPlayers, playerFaction, sheriffSecondVoteKey } from "./game-engine.js";
+import { activePlayers, canWitchSelfSave, isVillageCivilian, livingPlayers, playerFaction } from "./game-engine.js";
 import type { ChatMessage, GameState, Player, WitchAction } from "./types.js";
 
 type RuntimeMessage = ChatMessage & { channel?: "public" | "werewolf" | "lovers"; audienceIds?: string[] };
@@ -33,8 +33,6 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
   const originalEnterNight = proto.enterNight;
   const originalParticipatesWolfVote = proto.participatesWolfVote;
   const originalFirstLivingWolfId = proto.firstLivingWolfId;
-  const originalCastVoteById = proto.castVoteById;
-  const originalFinishVote = proto.finishVote;
   const originalFinishNight = proto.finishNight;
   const originalValidateWitchAction = proto.validateWitchAction;
   const originalPendingAITask = proto.pendingAITask;
@@ -55,7 +53,7 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     originalConfigureSettings.call(this, token, raw);
     if (raw?.winCondition === "slaughter_edge" || raw?.winCondition === "slaughter_all") {
       const state = this.requireState() as GameState;
-      (state.settings as any).winCondition = raw.winCondition;
+      state.settings.winCondition = raw.winCondition;
       markWinCondition(state);
       this.saveBroadcast(state);
     }
@@ -111,35 +109,6 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     return originalFirstLivingWolfId.call(this, state);
   };
 
-  proto.castVoteById = function (state: GameState, voterId: string, rawTargetId: string): void {
-    const voter = state.players.find((p) => p.id === voterId && p.alive && !p.isSpectator);
-    const isSheriff = voter?.id === state.sheriff.sheriffId;
-    if (!isSheriff) return originalCastVoteById.call(this, state, voterId, rawTargetId);
-
-    const [firstId, encodedSecond] = String(rawTargetId).split("|", 2);
-    const secondId = encodedSecond || firstId;
-    if (!firstId || !secondId) throw new Error("警長兩張票都需要合法目標");
-    validateSheriffVoteTarget(this, state, voter!, firstId);
-    validateSheriffVoteTarget(this, state, voter!, secondId);
-
-    const secondKey = sheriffSecondVoteKey(voterId);
-    delete state.votes[secondKey];
-    originalCastVoteById.call(this, state, voterId, firstId);
-    state.votes[secondKey] = secondId;
-
-    if (areVotesComplete(state)) this.finishVote(state);
-    else this.saveBroadcast(state);
-  };
-
-  proto.finishVote = function (state: GameState): void {
-    try {
-      return originalFinishVote.call(this, state);
-    } finally {
-      const suffix = sheriffSecondVoteKey("");
-      for (const key of Object.keys(state.roleMemory)) if (key.endsWith(suffix)) delete state.roleMemory[key];
-    }
-  };
-
   proto.finishNight = function (state: GameState): void {
     ensurePerWitchPotions(this, state);
     const originalActions = state.nightActions.witchActions;
@@ -189,27 +158,6 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
       syncLegacyWitchAvailability(this, state);
       if (completed && typeof this.touchAndSave === "function") this.touchAndSave(state);
     }
-  };
-
-  proto.decideAIVote = async function (state: GameState, actor: Player, apiKeys: string[]): Promise<string> {
-    let candidates = livingPlayers(state.players).filter((p) => p.id !== actor.id);
-    const pkCandidates = this.asStringArray((this.systemMem(state) as Record<string, unknown>).pkVoteCandidates) as string[];
-    if (pkCandidates.length) candidates = candidates.filter((p) => pkCandidates.includes(p.id));
-    if (!candidates.length) throw new Error("AI 沒有合法投票目標");
-
-    if (state.sheriff.sheriffId !== actor.id) return this.decideAITarget(state, actor, apiKeys, candidates);
-    if (!actor.ai) throw new Error("AI 設定不存在");
-
-    const result = await callAIWithKeys(apiKeys, {
-      config: actor.ai,
-      system: this.aiSystemPrompt(actor, state),
-      prompt: `${this.privateContext(state, actor)}\n\n你是警長，有兩張獨立放逐票，可同投一人或拆投兩人。合法目標：${candidates.map((p) => `${p.id}=${p.name}`).join(", ")}。只回傳 JSON：{"targetIds":["玩家ID1","玩家ID2"]}。`
-    });
-    const parsed = parseJSONObject(result.text) as Record<string, unknown>;
-    const ids = Array.isArray(parsed.targetIds) ? parsed.targetIds.filter((id): id is string => typeof id === "string") : [];
-    const first = candidates.some((p) => p.id === ids[0]) ? ids[0]! : candidates[0]!.id;
-    const second = candidates.some((p) => p.id === ids[1]) ? ids[1]! : (candidates[1]?.id ?? first);
-    return `${first}|${second}`;
   };
 
   proto.pendingAITask = function (state: GameState): any {
@@ -294,7 +242,7 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     markWinCondition(state);
     ensurePerWitchPotions(this, state);
     const view = originalProjectState.call(this, state, token);
-    view.settings.winCondition = (state.settings as any).winCondition;
+    view.settings.winCondition = state.settings.winCondition;
     const me = this.playerByToken(state, token) as Player;
     if (me.role === "witch") {
       const healAvailable = witchPotionAvailable(this, state, me.id, "heal");
@@ -334,13 +282,12 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
 }
 
 function ensureWinCondition(state: GameState): void {
-  const settings = state.settings as any;
-  if (settings.winCondition !== "slaughter_edge" && settings.winCondition !== "slaughter_all") settings.winCondition = "slaughter_edge";
+  if (state.settings.winCondition !== "slaughter_edge" && state.settings.winCondition !== "slaughter_all") state.settings.winCondition = "slaughter_edge";
 }
 
 function markWinCondition(state: GameState): void {
   const players = state.players as PlayerListWithHouseMeta;
-  players.__winConditionMode = (state.settings as any).winCondition as WinConditionMode;
+  players.__winConditionMode = state.settings.winCondition as WinConditionMode;
   const system = (state.roleMemory.__system ??= {}) as Record<string, unknown>;
   const assigned = state.players.filter((p) => !p.isSpectator && Boolean(p.role));
   if (assigned.length > 0 && typeof system.initialCivilianEdge !== "boolean") {
@@ -382,13 +329,6 @@ function chooseWolfLeader(room: any, state: GameState, baseParticipates: Functio
     .filter((player) => baseParticipates.call(room, state, player))
     .sort((a, b) => (WOLF_LEADER_PRIORITY[a.role ?? ""] ?? 10) - (WOLF_LEADER_PRIORITY[b.role ?? ""] ?? 10) || a.joinedAt - b.joinedAt || a.id.localeCompare(b.id));
   return candidates[0]?.id;
-}
-
-function validateSheriffVoteTarget(room: any, state: GameState, voter: Player, targetId: string): void {
-  const target = state.players.find((p) => p.id === targetId && p.alive && !p.isSpectator);
-  if (!target || target.id === voter.id) throw new Error("警長放逐票目標無效");
-  const pkCandidates = room.asStringArray((room.systemMem(state) as Record<string, unknown>).pkVoteCandidates) as string[];
-  if (pkCandidates.length && !pkCandidates.includes(targetId)) throw new Error("PK 重投只能投給平票候選人");
 }
 
 function nextWolfChatAI(room: any, state: GameState): Player | undefined {

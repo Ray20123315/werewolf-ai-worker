@@ -2,14 +2,13 @@ import { callAIWithKeys, parseJSONObject } from "./ai.js";
 import {
   activePlayers,
   areNightActionsComplete,
-  areVotesComplete,
   canGuardTarget,
   canWitchSelfSave,
   livingPlayers,
   playerFaction,
-  roleActionPrompt,
-  sheriffSecondVoteKey
+  roleActionPrompt
 } from "./game-engine.js";
+import { areEqualVotesComplete } from "./equal-vote.js";
 import type { GameState, Player, RoleActionPrompt, WitchAction } from "./types.js";
 
 type RoomPrototype = Record<string, any> & { __aiFlowRulesInstalled?: boolean };
@@ -65,8 +64,8 @@ export function installAIFlowRules(GameRoomCtor: { prototype: RoomPrototype }): 
   proto.enterVote = function (state: GameState): void {
     const result = originalEnterVote.call(this, state);
     if (state.phase !== "vote") return result;
-    if (!autoSkipNoTargetAIVotes(this, state)) return result;
-    if (areVotesComplete(state)) return this.finishVote(state);
+    if (!autoSkipNoTargetAIVotes(state)) return result;
+    if (areEqualVotesComplete(state)) return this.finishVote(state);
     this.saveBroadcast(state);
     return result;
   };
@@ -74,8 +73,8 @@ export function installAIFlowRules(GameRoomCtor: { prototype: RoomPrototype }): 
   proto.castVoteById = function (state: GameState, voterId: string, targetId: string): void {
     const result = originalCastVoteById.call(this, state, voterId, targetId);
     if (state.phase !== "vote") return result;
-    if (!autoSkipNoTargetAIVotes(this, state)) return result;
-    if (areVotesComplete(state)) return this.finishVote(state);
+    if (!autoSkipNoTargetAIVotes(state)) return result;
+    if (areEqualVotesComplete(state)) return this.finishVote(state);
     this.saveBroadcast(state);
     return result;
   };
@@ -344,17 +343,14 @@ function assertCurrentTask(room: any, state: GameState, playerId: string, operat
   if (!task || task.playerId !== playerId || task.operation !== operation) throw new Error("AI 操作已過期，請重新同步房間狀態");
 }
 
-function autoSkipNoTargetAIVotes(room: any, state: GameState): boolean {
+function autoSkipNoTargetAIVotes(state: GameState): boolean {
   if (state.phase !== "vote") return false;
-  const pkCandidates = room.asStringArray(room.systemMem(state).pkVoteCandidates) as string[];
   let changed = false;
   for (const voter of livingPlayers(state.players)) {
     if (!voter.isAI || !voter.ai || state.votes[voter.id]) continue;
-    let candidates = livingPlayers(state.players).filter((player) => player.id !== voter.id);
-    if (pkCandidates.length) candidates = candidates.filter((player) => pkCandidates.includes(player.id));
+    const candidates = livingPlayers(state.players).filter((player) => player.id !== voter.id && !player.kickedAt);
     if (candidates.length) continue;
     state.votes[voter.id] = AUTO_SKIP_TARGET;
-    if (state.sheriff.sheriffId === voter.id) state.votes[sheriffSecondVoteKey(voter.id)] = AUTO_SKIP_TARGET;
     changed = true;
   }
   return changed;

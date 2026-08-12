@@ -70,6 +70,16 @@ export function createVoteSnapshot(state: GameState): VoteSnapshot {
       continue;
     }
 
+    const memory = state.roleMemory[voter.id] ?? {};
+    const ravenInvalid = memory.ravenInvalidVoteRound === state.round;
+    const bombInvalid = memory.bombInvalidVoteRound === state.round;
+    const berserkerShield = memory.berserkerVoteShieldRound === state.round;
+    if ((ravenInvalid || bombInvalid) && !berserkerShield) {
+      const reason = ravenInvalid && bombInvalid ? "受到烏鴉與炸彈效果，本輪普通放逐票無效" : ravenInvalid ? "受到烏鴉詛咒，本輪普通放逐票無效" : "投票時持有炸彈，本輪普通放逐票無效";
+      entries.push({ voterId: voter.id, targetId, status: "invalid", reason });
+      continue;
+    }
+
     const passives = new Set(voter.role ? roleDefinition(voter.role).passives ?? [] : []);
     if (passives.has("vote_weight_zero")) {
       entries.push({ voterId: voter.id, targetId, status: "invalid", reason: "此角色的普通放逐票為無效票" });
@@ -144,12 +154,25 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
 
     const voter = validExilePlayers(state).find((player) => player.id === voterId);
     if (!voter) throw new Error("投票玩家無效");
+    const voterMemory = this.mem(state, voter.id) as Record<string, any>;
+    const externallyInvalid = voterMemory.ravenInvalidVoteRound === state.round || voterMemory.bombHolder === voter.id;
+    const bonus = Number(voterMemory.voteBonus ?? 0);
+    if (voter.role === "berserker_wolf" && externallyInvalid && bonus > 0) {
+      voterMemory.voteBonus = bonus - 1;
+      voterMemory.berserkerVoteShieldRound = state.round;
+    } else delete voterMemory.berserkerVoteShieldRound;
+
     if (targetId === ABSTAIN_TARGET || targetId === AUTO_SKIP_TARGET) {
       state.votes[voter.id] = targetId;
     } else {
       const target = validExilePlayers(state).find((player) => player.id === targetId);
       if (!target) throw new Error("投票目標無效");
       if (voter.id === target.id) throw new Error("不能投給自己");
+      if (voterMemory.bombHolder === voter.id) {
+        voterMemory.bombInvalidVoteRound = state.round;
+        delete voterMemory.bombHolder;
+        this.mem(state, target.id).bombHolder = target.id;
+      }
       state.votes[voter.id] = target.id;
     }
 
@@ -248,6 +271,8 @@ export function installEqualVoteRules(GameRoomCtor: { prototype: RoomPrototype }
       if (state.phase !== "vote") return result;
       sanitizeExileVotes(state);
       clearLegacyVoteFlow(this, state);
+      const memory = this.mem(state, targetId) as Record<string, any>;
+      delete memory.bombHolder;
       if (areEqualVotesComplete(state)) this.finishVote(state);
       return result;
     };

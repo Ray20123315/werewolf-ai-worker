@@ -1,227 +1,248 @@
 # 狼人殺 — Cloudflare Workers 辯論式狼人殺
 
-**狼人殺**是一個部署於 Cloudflare Workers 的即時多人狼人殺 Web App。每個房間由一個 Durable Object 維護 authoritative state，前端使用 WebSocket 即時同步。
+**狼人殺**是一個部署於 Cloudflare Workers 的即時多人狼人殺 Web App。每個房間由 Durable Object 維護 authoritative state，前端透過 WebSocket 即時同步。
 
-本專案只有一個玩法核心：**辯論式，不做暴民式。**
-
-- 夜晚：角色秘密行動。
-- 白天：公開資訊 → 依序正式發言 → 投票。
-- 自由聊天不等於正式發言，也不能跳過 Debate Gate。
-- 不實作武器、追逐、碰撞、距離、跑速、盔甲、隱形偷襲等 Minecraft 暴民式機制。
-- 原作中只存在暴民式效果的角色仍保留角色名稱，但改寫為資訊／狀態機效果。
+本專案只有一個產品玩法核心：**辯論式，不做暴民式。** 原作中依賴 Minecraft 武器、追逐、碰撞、距離、跑速、盔甲或隱形偷襲的效果，會改寫成可由伺服器驗證的資訊／狀態機規則。
 
 ---
 
-## 1. 房間與人物登入
+## 1. 房間與登入
 
-房間可直接用 URL 分享：
+房間可直接以 URL 分享：
 
 ```text
 https://your-worker.example/ABC234
 ```
 
-規則：
-
-- 房號全域唯一，由伺服器產生 6 碼代碼。
-- 房間密碼為**可選**。
-- 真人「人物密碼」為**必填**，最少 4 個字元。
-- 同一房間內名稱經 Unicode NFKC、空白正規化與不分大小寫比較後不可重複。
-- 瀏覽器 session 還有效時重新整理會直接恢復人物。
-- session 遺失、換瀏覽器或換裝置時，可用「房號 + 人物名稱 + 人物密碼」重新登入同一個人物。
-- 成功重新登入會 rotate session token，舊連線立即失效。
-- 房主踢人不是永久 Ban；名稱會釋放。對局進行中重新加入者只能觀戰，下一局才回到正式玩家，避免重新抽角色作弊。
-- 升級前建立、尚未有人物密碼的舊人物，只要既有 token 還有效，UI 會要求補設人物密碼。
-
-人物與房間密碼只保存 PBKDF2 verifier，不保存明碼。
+- 房號由伺服器產生 6 碼代碼。
+- 房間密碼可選；真人人物密碼必填。
+- 同房名稱使用 Unicode NFKC、空白正規化與不分大小寫比較防止重複。
+- 可用「房號 + 人物名稱 + 人物密碼」重新登入；成功後 session token 會 rotate。
+- 房主踢人不是永久 Ban。進行中的對局重新加入者只能觀戰，下一局才重新成為正式玩家。
+- 人物與房間密碼只保存 PBKDF2 verifier，不保存明碼。
 
 ---
 
-## 2. 辯論式狀態機
+## 2. 唯一狀態機與時間限制
 
 ```mermaid
 stateDiagram-v2
     [*] --> Lobby
-    Lobby --> Sheriff: 啟用警長
-    Lobby --> Night: 未啟用警長
+    Lobby --> Sheriff: 啟用警長選舉
+    Lobby --> Night: 未啟用警長選舉
     Sheriff --> Night: 選舉完成
-    Night --> Debate: 夜間結算完成
-    Debate --> Vote: 所有必要正式發言完成
-    Vote --> Debate: PK 平票追加發言
-    Vote --> Vote: 全場重投
-    Vote --> Night: 未分勝負
-    Vote --> Reaction: 獵人／黑狼王／嫁禍者等反應
-    Reaction --> Night
+    Night --> Debate: 夜間結算與必要 Reaction 完成
+    Debate --> Vote: 必要正式發言完成／逾時
+    Vote --> Reaction: 放逐或死亡產生必要反應
+    Vote --> Night: 投票結算完成且未終局
     Reaction --> Debate
-    Vote --> Ended: 達成勝負條件
-    Night --> Ended: 達成勝負條件
+    Reaction --> Vote
+    Reaction --> Night
+    Night --> Ended: 完整 reaction / terminal gate 後達成勝負
+    Vote --> Ended: 完整 reaction / terminal gate 後達成勝負
 ```
 
-房主可以設定：
+房主可設定：
 
 - 警長選舉開關。
 - 死亡資訊：隱藏、只顯示死者、顯示死因。
-- 平票：無人出局、全場重投、平票玩家 PK 正式發言後重投。
-- 角色配置可勾選「自動配置角色」；啟用後伺服器會依正式玩家數重算基本板子，玩家加入／離開與開局前都會重新對齊。取消勾選後才可手動調整完整 114 角色。
+- 勝負模式：`slaughter_edge`（屠邊）或 `slaughter_all`（屠城）。
+- 白天、黑夜時間；預設各 **120 秒**，可自訂。
+- 每組 CP 人數，最低 2 人。
+- 蠢蛋 modifier 開關；開啟後每名正式玩家每局獨立 **25%** 機率成為蠢蛋。
 
-警長首輪平票會進第二輪；第二輪仍平票則本局無警長。現任警長死亡後，依得票候補順位由仍存活者繼任。警長的放逐票計為 2 票。
+Durable Object alarm 是 phase deadline 的權威來源。白天逾時會自動略過尚未完成的正式發言，未投票者記為棄票；夜晚逾時時尚未提交的操作安全視為 pass，再進行結算。
 
----
-
-## 3. 角色系統
-
-角色系統由 `src/roles.ts` 的資料驅動 Registry 管理，目前共有 **114 個 canonical 角色**。角色可重複配置，不再限制「特殊角色只能一名」。完整角色表見 `docs/ROLE_CATALOG.md`。
-
-依目前採用的酷米主表分類，邱比特、抖M教徒、抖S教主的 **base faction 仍是好人陣營**；「戀人」是配對後的關係狀態，不等於把這三個角色本身固定改成第三方。
-
-角色來源分三類：
-
-- `official`：使用者提供的酷米狼人殺主文角色。
-- `discussion`：同頁留言／後續角色提案。
-- `adapted`：原效果主要依賴 Minecraft 暴民式物理互動，因此保留角色並明確改成辯論式資訊／狀態效果。
-
-測試會鎖定 114 個 canonical IDs，且每一個 `adapted` 角色都必須有 `debateAdaptation` 說明；角色 Registry 中出現的每個主動 `effect` 也必須存在 server resolver 或核心技能路徑。
-
-開局條件：
-
-- 至少 3 名正式玩家。
-- 配置角色總數必須等於正式玩家數。
-- 至少一名狼人陣營。
-- 開局狼人陣營數必須少於其他正式玩家總數。
-
-應用程式不再設定固定最大玩家數；實際容量仍受 Cloudflare Durable Objects / WebSocket / CPU / memory / storage 平台限制。
+死亡、踢人或其他 roster mutation 後，runtime 會重新收斂目前 phase：已死亡／觀戰／被踢的辯論玩家不會卡住發言游標；最後一個待操作玩家被踢後，Night / Sheriff / Debate / Vote 也會重新判斷是否可完成。
 
 ---
 
-## 4. 特殊資訊與結算
+## 3. Canonical 普通放逐投票
 
-目前引擎包含：
+普通放逐只有一套規則：
 
-- 狼刀、守護、女巫藥、查驗與偽裝。
-- 雪狼／次雪狼／詐欺師／百變狼／潛伏狼等查驗干擾。
-- 獵人、黑狼王、嫁禍者等 Reaction phase。
-- 戀人、替身、肉盾、夢遊者、延遲死亡、復活、角色交換與陣營轉換。
-- 怨靈、血族與第三方特殊勝負。
-- 烏鴉票、抖M無效票、辨別者條件票、炸彈票、暴走狼累積票權。
-- 警長與候補繼任。
-- PK 辯論重投。
-- 角色重複出現時的死亡反應 queue。
+- 每名存活、未被踢、非觀戰的正式玩家最多只有 **1 張普通放逐票**。
+- 警長在普通放逐時也只有 **1 張票**；不存在 `A|B` 雙票或 `::sheriff2` pseudo ballot。
+- 玩家可明確選擇 **棄票／跳過投票**。
+- 角色效果可以讓一張票「有效或無效」，但**不能把單一玩家的普通放逐票加權成 2 票以上**。
+- 所有人完成後立即建立 immutable `VoteSnapshot`，凍結有效票、棄票、無效票與各目標票數。
+- 投票後才發生的陷阱、渡靈、死亡或其他連鎖不會回頭修改已經成立的投票事實。
+- 最高票唯一者直接放逐；最高票並列時，只在**並列最高票者**中安全隨機抽一人出局。
+- UI 與系統訊息會顯示各目標票數、棄票與無效票。
 
-伺服器始終保存 canonical state；瀏覽器只收到該人物依法可知的 projection。
+### 一人一票下的角色適配
 
----
+- **抖M教徒**：普通放逐票固定為無效票；成為唯一最高票時仍可觸發其特殊勝利。
+- **辨別者**：投給好人陣營時該票無效。
+- **烏鴉**：使目標翌日普通放逐票無效，不再新增額外票數。
+- **炸彈狼**：炸彈持有者下一次實際投票時該票無效，且炸彈會傳給其投票目標；不再製造額外票數。
+- **暴走狼**：成功狼刀累積一次狂暴；可消耗狂暴抵銷一次烏鴉／炸彈造成的無效票，但抵銷後仍只有 1 票。
 
-## 5. 公開聊天與正式發言
-
-公開聊天與正式辯論分離：
-
-- `chat`：自由交流，不推進發言順位。
-- `speech`：只有目前輪到的玩家可以送出，送出後才推進 Debate Gate。
-- 夜晚關閉公開聊天。
-- 出局者與進行中觀戰者不能向存活玩家公開發言。
-- 船長依角色設定知道全角色，但不進正式發言順序。
-
-### 三語與即時翻譯
-
-- UI 支援 `zh-TW`（繁體中文）、`zh-CN`（简体中文）、`en`（English），選擇會保存在瀏覽器。
-- UI、114 個角色名稱／說明／辯論改寫、系統訊息、遊戲規則、技能與固定錯誤文字使用 repository 內固定三語翻譯；這些內容不送 Google、MyMemory 或生成式 AI。
-- 玩家送出的 `chat` 與 `speech` 保留原文。真人自由文字不把「介面語言」當成文字來源語言，而由上游翻譯以 `sl=auto` 自動偵測；已知來源語言的 AI 發言仍可附 source locale。
-- 只有觀看者需要跨語言顯示玩家自由文字時，前端才透過已登入房間的 `/api/rooms/:roomId/translate` 端點請求翻譯。翻譯失敗時顯示原文與可見失敗狀態，不把原文永久 cache 成成功翻譯，也不阻塞遊戲流程。
-- Worker 的 Google 主路徑照使用者提供的 Userscript：`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=...&dt=t&q=...`。
-- Google 先發送；若尚未快速得到可用結果，180ms 後可啟動 MyMemory 短文字備援。MyMemory 先完成時再保留 140ms 的 Google 優先等待窗。
-- MyMemory 備援只處理 UTF-8 不超過 500 bytes 的短文字。
-- 翻譯端點要求有效房間 session，並限制單次筆數、單筆長度與總文字長度，避免成為公開無限制翻譯代理。
-- 這條聊天翻譯鏈路**不是 Google Cloud Translation Basic v2**，不需要 `GOOGLE_TRANSLATE_API_KEYS`、Google Cloud Project、Billing 或翻譯 Worker Secret，也不使用 ChatGPT／Gemini 等生成式 AI。
-- `translate.googleapis.com` 的 `client=gtx` 路徑不是 Google Cloud Translation 公開 API；上游若改動、限流或失效，聊天翻譯可能暫時不可用。完整規則見 `docs/I18N_POLICY.md`。
-
-### 管理後台與房內管理員
-
-- `/admin` 是全站管理後台；API 使用 Worker Secret `ADMIN_PANEL_TOKENS` 的 Bearer Token 驗證，Token 只保存在管理者瀏覽器的 `sessionStorage`。
-- 後台可看已追蹤房間總數、房號、階段、玩家數、房主／房內管理員、聊天翻譯服務狀態，以及最近的 API／翻譯／AI／WebSocket 去敏錯誤。
-- 後台可以進入單一房間檢視、發系統公告、踢出玩家、指定或移除房內管理員；不會顯示人物密碼 verifier、session token、管理員 Token 或玩家 BYOK AI Key。
-- 房主可以指定「房內管理員」。房內管理員目前只取得秩序管理權（例如踢出一般玩家），不能取代房主開始／重開遊戲，也不能修改角色配置與房規；房內管理員不能踢房主或其他房內管理員。
-- 全房間清單由獨立 `RoomDirectory` Durable Object 登記。部署此版本後新建或再次被存取的房間會自動出現在後台；部署前已存在但之後完全沒有流量的休眠房間無法從 Durable Object namespace 反向列舉，可在後台輸入已知房號補登記。
+Legacy weighted-vote、PK/revote 與警長第二張普通放逐票的 helper 只可作舊資料相容參考，**不屬於 composed runtime 的產品規則**。
 
 ---
 
-## 6. 遊戲 AI：完全選用 + BYOK
+## 4. 勝負、死亡與 Reaction
 
-純真人房不需要任何 AI Provider。
+### 屠邊 `slaughter_edge`
 
-若房主加入 AI：
+狼人仍存活、場上沒有存活 spirit／怨靈，且好人方只剩 1 人或更少時，狼人陣營立即獲勝。
+
+### 屠城 `slaughter_all`
+
+狼人必須讓**所有其他陣營的存活正式玩家全部出局**才可獲勝，不套用屠邊提前終局。
+
+### 終局與死亡順序
+
+- Hunter、Black Wolf King 等 mandatory death reaction 必須先處理，再做 winner evaluation。
+- Reaction queue 可處理同一次連鎖死亡產生的多個反應。
+- 全部正式玩家同時出局時有明確 terminal state，不再留下 `winner === undefined` 的卡局。
+- Neutral 個人勝利使用 `winnerPlayerIds` 指定真正勝者，不會把同 faction 的已死亡 Neutral 一併列入。
+- **Red Axe Madman**：狼人全滅後仍可合法延續遊戲，因此一般「狼人為 0 → 村莊／怨靈勝」不能在它仍可行動時提前截斷對局。
+- **Suicide Bomber**：白天自爆可指定 0～2 名其他存活玩家；若爆炸後場上沒有其他存活正式玩家，由炸彈客取得個人特殊勝利。
+
+### 假死與交換生死
+
+- **Fake Killer** 的假死是獨立狀態，不呼叫真死亡 pipeline，因此不會錯觸 Hunter 開槍、戀人殉情、警長繼任等真死亡副作用；下一輪自動恢復。
+- **Magician**：一死一活時使用正式死亡／復活 invariant 交換生死；兩人都活時交換角色；兩人都死時不做角色交換。
+
+---
+
+## 5. 夜晚技能 resolver
+
+Night runtime 先收集合法 submission，再讓控制類效果先於核心技能生效。最重要的 invariant：
+
+```text
+Submission / availability
+        ↓
+Disable / hide / redirect pre-stage
+        ↓
+Seer / Guard / Witch / generic role actions
+        ↓
+Kills / death chains
+        ↓
+Mandatory reactions
+        ↓
+Delayed / revive status
+        ↓
+Canonical winner gate
+```
+
+因此 Dream Wolf、Warlock nullify、Alchemist 等「本晚失效」效果，不會因 Seer／Guard／Witch 走不同程式路徑而出現一部分已先執行、一部分被封鎖的差異。
+
+角色前置條件也由 server 決定 availability：
+
+- Bee 只有 Hive 已死時才會出現一次性技能。
+- Persuader Wolf 只有自己是最後一狼時才可轉化目標。
+- Red Axe Madman 只有場上已無狼人時才取得夜殺。
+- Sniper Eight Wolf 只在合法 cooldown 輪次顯示技能。
+- Necromancer 只有達到死亡比例 milestone 才建立 action。
+
+條件未成立時，不會向真人或 AI 顯示「可用技能」，也不會提前消耗 once-per-game 資源。
+
+---
+
+## 6. 角色、CP、蠢蛋與私人資訊
+
+`src/roles.ts` 保留來源 registry；composed runtime 再套用 `CoreRules` 的產品級 canonical override。
+
+- 新房與 reset 後，所有**目前 active 的產品角色**配置預設都為 1；實際開局仍依玩家數安全抽取合法板子。
+- Gold Water / `confirmed_villager` 已從產品角色池與產品 allowlist 移除；舊房資料只做 migration 成 `villager`。
+- `mimic_wolf`、`diviner` 目前也不在 active core pool，以避免與現有角色能力完全重複。
+- 邱比特可依房主設定一次配對 N 名玩家成一個 CP 群組；同一玩家不能同時加入兩組 CP。
+- CP 群組共享 lovers chat 與私人身分資訊；其中一人死亡時，其餘存活成員依戀人規則連鎖死亡。
+- 自己永遠可在 private projection 看見自己的角色說明、主動技能時機與被動資訊。
+- Hunter 在實際 pending death reaction 時可留下**一次**公開遺言。
+- 啟用 Fool 後，每名正式玩家以 crypto RNG 獨立 25% 取得私人 Fool modifier。
+
+角色名稱／固定遊戲文字使用 repository 內 `zh-TW`、`zh-CN`、`en` 靜態翻譯；不使用生成式 AI 翻譯固定內容。
+
+---
+
+## 7. AI：BYOK、合法性與多選項
+
+純真人房不需要 AI Provider。若房主加入 AI：
 
 1. 選 Provider / Model。
-2. 每個 AI 可輸入 **1~8 組 API Key**；Key pool 只放在房主目前瀏覽器 `sessionStorage`。
-3. AI 輪到操作時，房主瀏覽器把該 AI 的 Key pool 隨該次 `/ai/run` request 傳給 Worker。
-4. Provider 回傳無效憑證、配額／限流或暫時性錯誤時，Worker 才依序切換下一組 Key；遊戲規則錯誤與合法性錯誤不會靠換 Key 重試。
-5. Durable Object 不把 Key 寫進 room state / SQLite / repository / Worker Secrets。
-6. 分頁工作階段結束後必須重新輸入。
-
-AI 正式發言同時可回傳可選的 **結構化白天技能 action**。例如白狼王真的要自爆時必須回傳符合當前角色技能的 `effect/targetIds/option`；伺服器會再以 `roleActionPrompt`、合法目標與 target count 驗證。單純在發言文字提到「自爆／決鬥」不會觸發技能，避免誤判。
+2. 每個 AI 可輸入 1～8 組 API Key；Key pool 只存在房主目前瀏覽器的 `sessionStorage`。
+3. AI 操作時把該 AI Key pool 隨 `/ai/run` request 傳給 Worker。
+4. Provider 憑證／配額／限流類錯誤才切換下一組 Key；規則錯誤不靠換 Key 重試。
+5. Durable Object 不持久化 AI Key。
 
 支援 OpenAI、Gemini、DeepSeek 與 HTTPS OpenAI-compatible endpoint。
 
+AI runtime 規則：
+
+- 沒有實際／合法操作的 AI 直接 zero-token skip，不阻塞 phase。
+- 全部狼人都是 AI 且至少兩狼時，AI 狼會先進行受限的狼人秘密 council，再由唯一 wolf-kill leader 做最終刀口。
+- 多 option 技能不再固定使用 `options[0]`。模型回傳結構化 `option + targetIds`，server 再以目前 role prompt、合法 option、合法目標與 target count 驗證。
+- AI Sheriff 的普通放逐與真人一致，只回傳單一 `playerId`。
+
 ---
 
-## 7. 專案結構
+## 8. 聊天、翻譯與管理後台
+
+### 公開／秘密聊天
+
+- `chat` 是自由交流，不推進正式發言順位。
+- `speech` 只有目前 debater 可以提交，才會推進 Debate Gate。
+- 夜晚關閉公開聊天。
+- 狼人與 CP 秘密聊天室只投影給依法可知的成員。
+- 出局者與進行中觀戰者不能向存活玩家公開發言；Hunter 遺言是受限例外。
+
+### 三語與玩家自由文字翻譯
+
+- UI：`zh-TW`、`zh-CN`、`en`。
+- 固定 UI、角色、系統、規則文字只用 repository-owned 靜態翻譯。
+- 玩家 `chat` / `speech` 才使用遠端機器翻譯：Google `translate.googleapis.com` `client=gtx` 優先，MyMemory 僅作短文字 fallback。
+- 不需要 `GOOGLE_TRANSLATE_API_KEYS`，也不使用 ChatGPT／Gemini 等生成式 AI 翻譯固定內容或玩家聊天。
+- 詳細政策見 `docs/I18N_POLICY.md`。
+
+### 管理後台
+
+- `/admin` 使用 Worker Secret `ADMIN_PANEL_TOKENS` 的 Bearer Token。
+- 可查看房間／診斷、公告、踢人與設定房內管理員。
+- 不暴露人物密碼 verifier、session token、管理 Token 或玩家 BYOK AI Key。
+
+---
+
+## 9. 專案結構與驗證
+
+主要 runtime：
 
 ```text
-.
-├─ public/
-│  ├─ index.html
-│  ├─ admin.html
-│  ├─ admin.js
-│  ├─ styles.css
-│  ├─ admin.css
-│  ├─ i18n.js
-│  ├─ game-i18n.js
-│  ├─ role-name-i18n.js
-│  ├─ ui-fixes.css
-│  ├─ ui-fixes.js
-│  └─ app.js
-├─ src/
-│  ├─ index.ts
-│  ├─ room.ts
-│  ├─ room-directory.ts
-│  ├─ admin.ts
-│  ├─ game-engine.ts
-│  ├─ roles.ts
-│  ├─ auth.ts
-│  ├─ translate.ts
-│  ├─ ai.ts
-│  └─ types.ts
-├─ docs/
-│  ├─ ROLE_CATALOG.md
-│  └─ I18N_POLICY.md
-├─ test/
-│  ├─ game-engine.test.mjs
-│  ├─ translation.test.mjs
-│  ├─ admin.test.mjs
-│  └─ i18n-static.test.mjs
-├─ .github/workflows/verify.yml
-├─ SECURITY.md
-├─ wrangler.jsonc
-└─ package.json
+src/
+├─ room.ts                 # legacy/base GameRoom engine
+├─ game-engine.ts          # shared engine helpers
+├─ roles.ts                # source role registry
+├─ house-rules.ts          # multi-witch / wolf-leader / bounded AI chat
+├─ equal-vote.ts           # canonical one-player-one-vote snapshot engine
+├─ ai-flow.ts              # actionable AI scheduling / zero-token skips
+├─ core-state.ts           # canonical settings, winner modes, default role pool
+├─ core-relationships.ts   # multi-player CP
+├─ core-phase-ai.ts        # phase timer / AI wolf council / Hunter last words
+├─ core-integrity.ts       # phase/reaction/night/action cross-layer invariants
+├─ core-terminal.ts        # final canonical terminal gate
+├─ core-role-text.ts       # product text aligned with canonical runtime
+└─ chat-channels.ts        # installs the composed runtime
 ```
 
----
-
-## 8. 本機開發與驗證
+`CoreRules` 是最後的 canonical convergence layer；測試必須同時驗證單元規則與最終組合 invariant，不能以「兩套互相衝突的單測各自都綠」當成產品正確。
 
 需求：Node.js 22。
 
 ```bash
 npm ci
-npm run cf-typegen
 npm run dev
 ```
 
-完整驗證：
+完整 Gate：
 
 ```bash
 npm run verify
 ```
 
-等價核心 Gate：
+等價核心步驟：
 
 ```bash
 npm test
@@ -231,7 +252,7 @@ npx wrangler deploy --dry-run --outdir .wrangler-dry-run
 
 ---
 
-## 9. 部署
+## 10. 部署與安全
 
 ```bash
 npx wrangler login
@@ -240,18 +261,12 @@ npx wrangler deploy
 
 也可使用 Cloudflare Workers Builds 連接 GitHub，Production branch 指向 `main`。
 
-本 repository 不需要部署者提供共享**遊戲 AI** API Key；遊戲 AI 仍由房主 BYOK。玩家 `chat` / `speech` 翻譯也不需要 Google Cloud Translation API Key 或 Worker Secret，因此不需要設定 `GOOGLE_TRANSLATE_API_KEYS`。
+本 repository 不需要部署者提供共享遊戲 AI API Key；AI 由房主 BYOK。玩家聊天翻譯也不需要 Google Cloud Translation API Key。
 
-全站管理後台需要至少一組長度 24 字元以上的隨機管理 Token：
+管理後台至少需要一組隨機管理 Token：
 
 ```bash
 npx wrangler secret put ADMIN_PANEL_TOKENS
 ```
 
-可放最多 8 組，以換行、逗號或分號分隔。管理 Token 不應與人物密碼、房間密碼或遊戲 AI Key 共用。部署完成後由 `/admin` 輸入 Token。
-
----
-
-## 10. 安全
-
-請閱讀 `SECURITY.md`。重點：人物／房間密碼不以明碼保存、token 會在重新登入時 rotate、遊戲 AI BYOK Key pool 不持久化、完整角色與夜間秘密不直接送到一般瀏覽器；只有跨語言顯示的玩家 `chat` / `speech` 會由 Worker 送往 Google `client=gtx` 路徑，必要時使用 MyMemory 短文字備援。固定 UI／角色／系統文字不送遠端翻譯。管理後台另以 `ADMIN_PANEL_TOKENS` Secret 驗證，診斷錯誤在寫入 `RoomDirectory` 前會先去除常見 credential/token 形式。
+詳細安全規則見 `SECURITY.md`。核心原則：密碼不保存明碼、重新登入 rotate token、AI Key 不持久化、秘密角色與秘密聊天室只投影給合法觀看者、固定遊戲內容不送遠端翻譯、管理診斷會先去除常見 credential/token 形式。

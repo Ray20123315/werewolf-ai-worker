@@ -119,9 +119,20 @@ export type Role = typeof ROLE_IDS[number];
 export type Phase = "lobby" | "sheriff" | "night" | "debate" | "vote" | "reaction" | "ended";
 export type Faction = "village" | "werewolf" | "spirit" | "neutral" | "blood";
 export type Team = Faction;
+export type Winner = Faction | "draw";
 export type AppLocale = "zh-TW" | "zh-CN" | "en";
 export type AIProvider = "openai" | "gemini" | "deepseek" | "openai-compatible";
-export type AIOperation = "night_action" | "debate_speech" | "vote" | "role_action";
+export type AIOperation =
+  | "night_action"
+  | "debate_speech"
+  | "vote"
+  | "role_action"
+  | "sheriff_vote"
+  | "reaction_action"
+  | "wolf_chat"
+  | "free_chat"
+  | "addon_sadist_probe"
+  | "core_wolf_council";
 export type RoleActionTiming = "setup" | "sheriff" | "night" | "day" | "vote" | "reaction" | "passive";
 export type RoleTargetMode =
   | "none"
@@ -273,6 +284,7 @@ export type WitchAction =
   | { type: "poison"; targetId: string };
 
 export type DeathInfoMode = "hidden" | "names" | "full";
+/** Legacy persistence accepts old values, but the composed runtime always normalizes to random_elimination. */
 export type TieRule = "no_elimination" | "revote" | "pk_revote" | "random_elimination";
 
 export interface GameSettings {
@@ -280,6 +292,11 @@ export interface GameSettings {
   deathInfo: DeathInfoMode;
   tieRule: TieRule;
   autoRoleSetup: boolean;
+  winCondition?: "slaughter_edge" | "slaughter_all";
+  foolEnabled?: boolean;
+  loverGroupSize?: number;
+  dayDurationSeconds?: number;
+  nightDurationSeconds?: number;
 }
 
 export interface SheriffState {
@@ -326,6 +343,7 @@ export interface GameState {
   lastNightDeaths: string[];
   deathReasons: Record<string, string>;
   lastVoteEliminated?: string;
+  /** Legacy/base engine faction winner. Composed draw terminal is an ended state projected as Winner. */
   winner?: Faction;
   winnerPlayerIds?: string[];
   winnerLabel?: string;
@@ -411,7 +429,7 @@ export interface PrivateView {
   lastNightDeaths: string[];
   deathReasons?: Record<string, string>;
   lastVoteEliminated?: string;
-  winner?: Faction;
+  winner?: Winner;
   winnerPlayerIds?: string[];
   winnerLabel?: string;
 }
