@@ -1,7 +1,7 @@
 import type { AIConfig, AIProvider } from "./types";
 
 export interface AIRequest {
-  config: AIConfig;
+  config: AIConfig | undefined;
   system: string;
   prompt: string;
 }
@@ -52,7 +52,9 @@ export async function callAIWithKeys(apiKeys: readonly string[], request: AIRequ
 
 export async function callAI(apiKey: string, request: AIRequest): Promise<AIResult> {
   const key = requireCredential(apiKey);
-  const { provider, model } = request.config;
+  const config = request.config;
+  if (!config) throw new Error("AI 玩家設定遺失");
+  const { provider, model } = config;
   switch (provider) {
     case "openai":
       return callOpenAI(key, model, request.system, request.prompt);
@@ -61,7 +63,7 @@ export async function callAI(apiKey: string, request: AIRequest): Promise<AIResu
     case "deepseek":
       return callDeepSeek(key, model, request.system, request.prompt);
     case "openai-compatible":
-      return callOpenAICompatible(key, requireBaseUrl(request.config.baseUrl), model, request.system, request.prompt);
+      return callOpenAICompatible(key, requireBaseUrl(config.baseUrl), model, request.system, request.prompt);
     default:
       return assertNever(provider);
   }

@@ -86,6 +86,10 @@ export class RoomDirectory extends DurableObject<Env> {
     );
   }
 
+  async unregisterRoom(roomId: string): Promise<void> {
+    this.ctx.storage.sql.exec("DELETE FROM rooms WHERE room_id = ?", normalizeRoomId(roomId));
+  }
+
   async listRooms(limit = 100, offset = 0, search = "", activity: RoomActivityFilter = "all", activeSince = 0): Promise<RoomDirectoryEntry[]> {
     const safeLimit = clampInt(limit, 1, 250);
     const safeOffset = clampInt(offset, 0, 100_000);
