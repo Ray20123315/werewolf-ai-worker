@@ -14,6 +14,8 @@ export const MYMEMORY_MAX_BYTES = 500;
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type TranslationCandidate = { translatedText: string; provider: "google" | "mymemory" };
 
+const inFlightTranslations = new Map<string, Promise<string>>();
+
 export function normalizeTranslationLocale(value: unknown): TranslationLocale | undefined {
   if (value === "zh-TW" || value === "zh-CN" || value === "en") return value;
   return undefined;
@@ -45,11 +47,31 @@ export async function translateTexts(
   if (sourceLocale && sourceLocale === targetLocale) return [...texts];
   if (!texts.length) return [];
 
-  return mapWithConcurrency(texts, GOOGLE_TRANSLATE_MAX_CONCURRENCY, async (text) => {
-    const translated = await translateWithLowLatency(fetcher, text, targetLocale);
-    if (!translated) throw new Error("玩家聊天翻譯服務暫時無法使用");
-    return translated;
-  });
+  return mapWithConcurrency(texts, GOOGLE_TRANSLATE_MAX_CONCURRENCY, (text) =>
+    translateTextCoalesced(fetcher, text, targetLocale, sourceLocale)
+  );
+}
+
+function translateTextCoalesced(
+  fetcher: FetchLike,
+  text: string,
+  targetLocale: TranslationLocale,
+  sourceLocale?: TranslationLocale
+): Promise<string> {
+  const key = `${sourceLocale ?? "auto"}\u0000${targetLocale}\u0000${text}`;
+  const existing = inFlightTranslations.get(key);
+  if (existing) return existing;
+
+  const task = translateWithLowLatency(fetcher, text, targetLocale)
+    .then((translated) => {
+      if (!translated) throw new Error("玩家聊天翻譯服務暫時無法使用");
+      return translated;
+    })
+    .finally(() => {
+      if (inFlightTranslations.get(key) === task) inFlightTranslations.delete(key);
+    });
+  inFlightTranslations.set(key, task);
+  return task;
 }
 
 async function translateWithLowLatency(
