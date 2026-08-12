@@ -1,15 +1,9 @@
 import { activePlayers, checkWinner, playerFaction } from "./game-engine.js";
 import { ROLE_LIST, roleDefinition } from "./roles.js";
-import type { GameState, RoleSetup } from "./types.js";
+import type { GameState, Player, RoleSetup } from "./types.js";
 
 type RoomPrototype = Record<string, any> & { __coreStateRulesInstalled?: boolean };
-export type RuntimeSettings = GameState["settings"] & {
-  winCondition?: "slaughter_edge" | "slaughter_all";
-  foolEnabled?: boolean;
-  loverGroupSize?: number;
-  dayDurationSeconds?: number;
-  nightDurationSeconds?: number;
-};
+export type RuntimeSettings = GameState["settings"];
 type RuntimeState = GameState & { coreDefaultRolePoolV1?: boolean; lastVoteSummary?: unknown };
 
 export const CORE_REMOVED_ROLE_IDS = ["confirmed_villager", "mimic_wolf", "diviner"] as const;
@@ -49,12 +43,19 @@ export function exactDuplicateCoreSkills(): Array<{ roles: string[]; signature: 
 }
 
 export function coreWinner(state: GameState): ReturnType<typeof checkWinner> {
-  const alive = formalLiving(state);
+  const alive = winnerLiving(state);
   if (!alive.length) return undefined;
-  const base = checkWinner(state.players);
-  if (base && base !== "werewolf") return base;
+  const projected = projectFakeDeathsForWinner(state);
+  const base = checkWinner(projected);
   const wolves = alive.filter((player) => playerFaction(player) === "werewolf").length;
+  const redAxes = alive.filter((player) => player.role === "red_axe_madman").length;
+
+  // Red Axe is a neutral continuation role: the ordinary "wolves are gone"
+  // village/spirit terminal must wait while a Red Axe can still inherit the kill.
+  if (wolves === 0 && redAxes > 0) return alive.length === 1 && redAxes === 1 ? "neutral" : undefined;
+  if (base && base !== "werewolf") return base;
   if (!wolves) return base;
+
   const settings = state.settings as RuntimeSettings;
   if (settings.winCondition === "slaughter_all") {
     return alive.every((player) => playerFaction(player) === "werewolf") ? "werewolf" : undefined;
@@ -271,4 +272,17 @@ function randomQuarter(): boolean {
   const value = new Uint32Array(1);
   crypto.getRandomValues(value);
   return value[0]! < 0x40000000;
+}
+
+function winnerLiving(state: GameState): Player[] {
+  return formalPlayers(state).filter((player) => player.alive || state.roleMemory[player.id]?.fakeDeath === true);
+}
+
+function projectFakeDeathsForWinner(state: GameState): Player[] {
+  const projected = state.players.map((player) => state.roleMemory[player.id]?.fakeDeath === true ? { ...player, alive: true } : player) as any;
+  const source = state.players as any;
+  projected.__winConditionMode = source.__winConditionMode;
+  projected.__initialCivilianEdge = source.__initialCivilianEdge;
+  projected.__initialGodEdge = source.__initialGodEdge;
+  return projected as Player[];
 }
