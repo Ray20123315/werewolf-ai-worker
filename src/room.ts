@@ -658,7 +658,10 @@ export class GameRoom extends DurableObject<Env> {
       this.resolveSpiritInspection(state, seer, target);
     }
     this.resolveNightRoleActions(state);
-    if (state.winner) return this.endGame(state, state.winner);
+    if (state.winner) {
+      if (state.winner === "draw") return;
+      return this.endGame(state, state.winner);
+    }
     const wolfTarget = this.wolfTarget(state);
     const guardTargets = new Set(Object.values(state.nightActions.guardTargets));
     let actualWolfTarget = wolfTarget;

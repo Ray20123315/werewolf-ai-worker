@@ -576,7 +576,7 @@ function endIndividual(room: any, state: GameState, playerId: string, label: str
 
 function endDraw(room: any, state: GameState, label: string): boolean {
   state.phase = "ended";
-  (state as any).winner = "draw";
+  state.winner = "draw";
   state.winnerPlayerIds = [];
   state.winnerLabel = label;
   delete state.pendingReaction;
