@@ -1,4 +1,6 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
+import { assertCurrentAITask, captureAITaskContext, isCurrentAITask } from "./ai-task-freshness.js";
+import type { AITaskContext } from "./ai-task-freshness.js";
 import { countsAsAliveForDeathGate, isRealDeadForDeathGate } from "./core-fake-death.js";
 import { loverGroupMembers } from "./core-relationships.js";
 import { activeCoreRoleDefinitions } from "./core-state.js";
@@ -72,6 +74,10 @@ export function installPost28FullRepairRules(GameRoomCtor: { prototype: RoomProt
   const originalWebSocketError = proto.webSocketError;
   const originalAlarm = proto.alarm;
   const originalSaveBroadcast = proto.saveBroadcast;
+
+  proto.rescheduleRoomAlarm = function (state: GameState): void {
+    scheduleNextAlarm(this, state);
+  };
 
   if (typeof originalRequireState === "function") {
     proto.requireState = function (): GameState {
@@ -330,8 +336,12 @@ export function installPost28FullRepairRules(GameRoomCtor: { prototype: RoomProt
     proto.runAI = async function (hostToken: string, playerId: string, apiKeys: string[]): Promise<{ ok: true }> {
       const state = this.requireState() as GameState;
       const task = this.pendingAITask(state) as RuntimeTask | undefined;
+      const taskContext = task ? captureAITaskContext(state, task) : undefined;
       const actor = state.players.find((player) => player.id === playerId && player.alive && player.isAI && !player.isSpectator && player.ai);
-      if (task?.playerId === playerId && actor?.ai && task.operation === "core_wolf_council") return runSafeWolfCouncilAI(this, state, actor, apiKeys);
+      if (task?.playerId === playerId && actor?.ai && task.operation === "core_wolf_council" && taskContext) {
+        this.assertHost(state, hostToken);
+        return runSafeWolfCouncilAI(this, state, actor, taskContext, apiKeys);
+      }
       const copied = actor ? copiedPrompt(this, state, actor) : undefined;
       if (task?.playerId === playerId && actor?.ai && task.operation === "role_action" && copied && state.phase === "night") {
         this.assertHost(state, hostToken);
@@ -345,8 +355,16 @@ export function installPost28FullRepairRules(GameRoomCtor: { prototype: RoomProt
             if (second) targetIds.push(second.id);
           }
         }
-        this.submitRoleActionInternal(state, actor, copied.effect, targetIds, copied.options?.[0]);
-        this.afterNightSubmission(state);
+        const current = this.requireState() as GameState;
+        this.assertHost(current, hostToken);
+        assertCurrentAITask(this, current, taskContext!);
+        const nowActor = current.players.find((player) => player.id === playerId && player.alive && player.isAI && !player.isSpectator && player.ai);
+        const currentCopied = nowActor ? copiedPrompt(this, current, nowActor) : undefined;
+        if (!nowActor?.ai || !currentCopied || currentCopied.effect !== copied.effect || currentCopied.targetMode !== copied.targetMode) {
+          throw new Error("AI 操作已過期，請重新同步房間狀態");
+        }
+        this.submitRoleActionInternal(current, nowActor, currentCopied.effect, targetIds, currentCopied.options?.[0]);
+        this.afterNightSubmission(current);
         return { ok: true };
       }
       return originalRunAI.call(this, hostToken, playerId, apiKeys);
@@ -1014,7 +1032,7 @@ function safeCouncilCohort(room: any, state: GameState, actor: Player): boolean 
   return cohort.length >= 2 && cohort.every((player) => player.isAI && player.ai);
 }
 
-async function runSafeWolfCouncilAI(room: any, state: GameState, actor: Player, apiKeys: string[]): Promise<{ ok: true }> {
+async function runSafeWolfCouncilAI(room: any, state: GameState, actor: Player, taskContext: AITaskContext, apiKeys: string[]): Promise<{ ok: true }> {
   const cohort = [actor, ...(room.wolfTeammates(state, actor) as Player[])];
   if (cohort.length < 2 || cohort.some((player) => !player.isAI || !player.ai)) return { ok: true };
   const result = await callAIWithKeys(apiKeys, {
@@ -1025,8 +1043,9 @@ async function runSafeWolfCouncilAI(room: any, state: GameState, actor: Player, 
   const parsed = parseJSONObject(result.text) as Record<string, unknown>;
   const content = typeof parsed.message === "string" && parsed.message.trim() ? room.normalizeChat(parsed.message) : "請可相認的狼隊成員綜合公開資訊決定今晚刀口。";
   const current = room.requireState() as GameState;
-  const nowActor = validLivingPlayer(current, actor.id);
-  if (!nowActor || current.phase !== "night") return { ok: true };
+  if (!isCurrentAITask(room, current, taskContext)) return { ok: true };
+  const nowActor = current.players.find((player) => player.id === actor.id && player.alive && player.isAI && !player.isSpectator && !player.kickedAt && player.ai);
+  if (!nowActor || !safeCouncilCohort(room, current, nowActor)) return { ok: true };
   const audienceIds = [nowActor.id, ...(room.wolfTeammates(current, nowActor) as Player[]).map((player) => player.id)];
   const message = room.chatMessage(current, nowActor, content);
   message.channel = "werewolf";
@@ -1134,6 +1153,10 @@ function augmentWinningAllegiance(room: any, state: GameState, winner: string): 
 }
 
 function armEmptyRoomCleanup(room: any, state: GameState): void {
+  if (openSocketCount(room) > 0) {
+    clearEmptyRoomCleanup(room, state);
+    return;
+  }
   const system = room.systemMem(state) as Record<string, any>;
   system.roomEmptyDisposeAt = Date.now() + EMPTY_ROOM_GRACE_MS;
   room.touchAndSave(state);
@@ -1156,9 +1179,10 @@ function emptyCleanupExpired(room: any, state: GameState): boolean {
 function scheduleNextAlarm(room: any, state: GameState): void {
   const system = room.systemMem(state) as Record<string, any>;
   const phase = typeof system.phaseDeadlineAt === "number" ? system.phaseDeadlineAt : undefined;
-  const empty = typeof system.roomEmptyDisposeAt === "number" ? system.roomEmptyDisposeAt : undefined;
+  const empty = openSocketCount(room) === 0 && typeof system.roomEmptyDisposeAt === "number" ? system.roomEmptyDisposeAt : undefined;
   const next = [phase, empty].filter((value): value is number => typeof value === "number" && Number.isFinite(value)).sort((a, b) => a - b)[0];
   if (next) void room.ctx?.storage?.setAlarm?.(next);
+  else void room.ctx?.storage?.deleteAlarm?.();
 }
 
 function openSocketCount(room: any): number {
@@ -1173,13 +1197,15 @@ function safeState(room: any): GameState | undefined {
 
 async function disbandRoom(room: any, reason: string): Promise<void> {
   const state = safeState(room);
-  const roomId = state?.roomId;
+  if (!state) throw new Error("房間不存在");
+  const roomId = state.roomId;
+  const removedAt = Date.now();
   for (const socket of typeof room.ctx?.getWebSockets === "function" ? room.ctx.getWebSockets() : []) {
     try { socket.close(4000, reason); } catch { /* best effort */ }
   }
   if (typeof room.ctx?.storage?.deleteAll === "function") await room.ctx.storage.deleteAll();
   room.stateCache = undefined;
-  if (roomId && room.env?.ROOM_DIRECTORY) {
-    await room.env.ROOM_DIRECTORY.getByName("global").unregisterRoom(roomId);
+  if (room.env?.ROOM_DIRECTORY) {
+    await room.env.ROOM_DIRECTORY.getByName("global").unregisterRoom(roomId, removedAt);
   }
 }

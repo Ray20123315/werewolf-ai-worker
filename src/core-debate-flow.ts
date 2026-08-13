@@ -9,6 +9,7 @@ type RuntimeRoom = {
   requireState(): GameState;
   systemMem(state: GameState): RuntimeMemory;
   touchAndSave(state: GameState): void;
+  rescheduleRoomAlarm?(state: GameState): void;
 };
 
 export function installCoreDebateFlowRules(GameRoomCtor: { prototype: RoomPrototype }): void {
@@ -63,7 +64,7 @@ export function installCoreDebateFlowRules(GameRoomCtor: { prototype: RoomProtot
   }
 }
 
-export function clearDebateDeadline(room: Pick<RuntimeRoom, "ctx" | "systemMem">, state: GameState): boolean {
+export function clearDebateDeadline(room: Pick<RuntimeRoom, "ctx" | "systemMem" | "rescheduleRoomAlarm">, state: GameState): boolean {
   if (state.phase !== "debate") return false;
   const system = room.systemMem(state);
   const hadDeadline = system.phaseDeadlineAt !== undefined
@@ -73,6 +74,7 @@ export function clearDebateDeadline(room: Pick<RuntimeRoom, "ctx" | "systemMem">
   delete system.phaseDeadlineAt;
   delete system.phaseDeadlineKind;
   delete system.phaseDeadlinePersistedAt;
-  void room.ctx?.storage?.deleteAlarm?.();
+  if (typeof room.rescheduleRoomAlarm === "function") room.rescheduleRoomAlarm(state);
+  else void room.ctx?.storage?.deleteAlarm?.();
   return true;
 }

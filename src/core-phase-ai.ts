@@ -1,4 +1,6 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
+import { captureAITaskContext, isCurrentAITask } from "./ai-task-freshness.js";
+import type { AITaskContext } from "./ai-task-freshness.js";
 import { playerFaction, roleActionPrompt, secureShuffle } from "./game-engine.js";
 import { coreWinner, DEFAULT_PHASE_SECONDS, formalLiving } from "./core-state.js";
 import type { RuntimeSettings } from "./core-state.js";
@@ -132,9 +134,10 @@ export function installCorePhaseAIRules(GameRoomCtor: { prototype: RoomPrototype
       this.assertHost(before, hostToken);
       const task = this.pendingAITask(before) as RuntimeAITask | undefined;
       if (!task || task.playerId !== playerId) throw new Error("此 AI 目前沒有待執行操作");
+      const taskContext = captureAITaskContext(before, task);
       const actor = before.players.find((player) => player.id === playerId && player.isAI && player.alive && !player.isSpectator && player.ai);
       if (!actor?.ai) throw new Error("AI 玩家狀態無效");
-      if (task.operation === COUNCIL_OPERATION) return runWolfCouncilAI(this, before, actor, apiKeys);
+      if (task.operation === COUNCIL_OPERATION) return runWolfCouncilAI(this, before, actor, taskContext, apiKeys);
       if (before.phase === "night" && actor.role === "cupid" && !before.nightActions.roleActions[actor.id] && roleActionPrompt(actor, before)?.effect === "link_lovers") {
         return runCupidGroupAI(this, before, actor);
       }
@@ -205,7 +208,8 @@ function clearPhaseDeadline(room: any, state: GameState): void {
   const system = room.systemMem(state) as Record<string, unknown>;
   delete system.phaseDeadlineAt;
   delete system.phaseDeadlineKind;
-  void room.ctx?.storage?.deleteAlarm?.();
+  if (typeof room.rescheduleRoomAlarm === "function") room.rescheduleRoomAlarm(state);
+  else void room.ctx?.storage?.deleteAlarm?.();
 }
 
 function forcePassNight(room: any, state: GameState): void {
@@ -236,7 +240,7 @@ function nextAllAIWolfCouncil(room: any, state: GameState): Player | undefined {
   return wolves.find((player) => !used.has(player.id));
 }
 
-async function runWolfCouncilAI(room: any, state: GameState, actor: Player, apiKeys: string[]): Promise<{ ok: true }> {
+async function runWolfCouncilAI(room: any, state: GameState, actor: Player, taskContext: AITaskContext, apiKeys: string[]): Promise<{ ok: true }> {
   const result = await callAIWithKeys(apiKeys, {
     config: actor.ai!,
     system: room.aiSystemPrompt(actor, state),
@@ -245,8 +249,8 @@ async function runWolfCouncilAI(room: any, state: GameState, actor: Player, apiK
   const parsed = parseJSONObject(result.text) as Record<string, unknown>;
   const content = typeof parsed.message === "string" && parsed.message.trim() ? room.normalizeChat(parsed.message) : "請狼刀主控綜合公開發言與隊友意見決定今晚刀口。";
   const current = room.requireState() as GameState;
-  if (current.phase !== "night") return { ok: true };
-  const nowActor = current.players.find((player) => player.id === actor.id && player.alive && player.isAI);
+  if (!isCurrentAITask(room, current, taskContext)) return { ok: true };
+  const nowActor = current.players.find((player) => player.id === actor.id && player.alive && player.isAI && !player.isSpectator && player.ai);
   if (!nowActor) return { ok: true };
   const audienceIds = formalLiving(current).filter((player) => playerFaction(player) === "werewolf").map((player) => player.id);
   const message = room.chatMessage(current, nowActor, content) as RuntimeMessage;

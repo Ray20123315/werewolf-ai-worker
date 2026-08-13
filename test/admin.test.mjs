@@ -2,7 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { adminTokenFromRequest, classifyDiagnostic, isAdminRequest, parseAdminTokens, sanitizeDiagnosticMessage } from "../.test-build/admin.js";
+import { adminTokenFromRequest, classifyDiagnostic, isAdminRequest, parseAdminTokens, parseBoundedIntegerQuery, sanitizeDiagnosticMessage } from "../.test-build/admin.js";
+
+test("admin integer queries reject partial and unsafe numeric strings", () => {
+  assert.equal(parseBoundedIntegerQuery("25", 10, 1, 100), 25);
+  assert.equal(parseBoundedIntegerQuery("999", 10, 1, 100), 100);
+  assert.equal(parseBoundedIntegerQuery("25junk", 10, 1, 100), 10);
+  assert.equal(parseBoundedIntegerQuery("1e2", 10, 1, 100), 10);
+  assert.equal(parseBoundedIntegerQuery("9007199254740993", 10, 1, 100), 10);
+});
 
 test("admin tokens accept any non-empty trimmed length with dedupe", () => {
   const short = "x";
@@ -24,6 +32,8 @@ test("admin diagnostics redact common credential forms and classify translation 
   assert.doesNotMatch(redacted, new RegExp("a{48}"));
   assert.equal(classifyDiagnostic("/api/rooms/ABC234/translate", "Google Translation HTTP 403"), "translation");
   assert.equal(classifyDiagnostic("/api/rooms/ABC234/ai/run", "AI provider HTTP 429"), "ai");
+  const indexSource = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+  assert.match(indexSource, /message\.includes\("登入嘗試過多"\)\) return 429/);
 });
 
 test("admin dashboard exposes server-backed searchable diagnostics and grouped errors", () => {
@@ -38,6 +48,23 @@ test("admin dashboard exposes server-backed searchable diagnostics and grouped e
   assert.match(directorySource, /GROUP BY room_id, source, category, message, detail/);
   assert.match(directorySource, /async errorStats/);
   assert.match(directorySource, /RoomActivityFilter/);
+});
+
+test("room activity tracking runs only after a room request succeeds", () => {
+  const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+  const routeStart = source.indexOf("const match = url.pathname.match");
+  const routeEnd = source.indexOf("} catch (error)", routeStart);
+  const routes = source.slice(routeStart, routeEnd);
+  assert.doesNotMatch(routes, /const action = match\[2\][\s\S]{0,120}trackRoom/);
+  for (const operation of ["joinHuman", "loginHuman", "addAI", "getStateByToken"]) {
+    const call = routes.indexOf(`await room.${operation}`);
+    const tracked = routes.indexOf("trackRoom(ctx, env, roomId)", call);
+    assert.ok(call >= 0 && tracked > call, `${operation} must be validated before tracking`);
+  }
+  assert.match(routes, /const response = await room\.fetch\(request\);\s*if \(response\.status === 101\) trackRoom/);
+  assert.match(source, /registerRoom\(roomId, seenAt\)/);
+  assert.match(source, /playerId === "__disband_room__"\) await directory\.unregisterRoom\(roomId, Date\.now\(\)\)/);
+  assert.match(source, /const result = await room\.initialize[\s\S]{0,180}trackRoom\(ctx, env, roomId\)/);
 });
 
 test("admin UI remains compact and responsive instead of forcing wide tables", () => {

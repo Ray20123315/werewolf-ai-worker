@@ -255,6 +255,28 @@ test("AI autonomy has hard conversation caps and never chains from AI chat", () 
   assert.match(channels, /\.slice\(-12\)/);
 });
 
+test("only the host can trigger model-backed free or wolf chat", async () => {
+  class GuardedRoom {
+    constructor(value) { this.state = value; this.originalAIRuns = 0; }
+    requireState() { return this.state; }
+    mem(value, id) { value.roleMemory[id] ??= {}; return value.roleMemory[id]; }
+    systemMem(value) { return this.mem(value, "__system"); }
+    pendingAITask() { return { playerId: "bot", operation: "free_chat" }; }
+    async runAI() { this.originalAIRuns += 1; return { ok: true }; }
+    assertHost() { throw new Error("host only"); }
+  }
+  installHouseRules(GuardedRoom);
+  const bot = { ...player("bot", "villager"), isAI: true, ai: { provider: "deepseek", model: "x" } };
+  const value = multiWitchState();
+  value.phase = "debate";
+  value.players = [bot];
+  value.hostPlayerId = "someone-else";
+  const room = new GuardedRoom(value);
+
+  await assert.rejects(room.runAI("not-host", bot.id, ["key"]), /host only/);
+  assert.equal(room.originalAIRuns, 0);
+});
+
 test("wolf kill leader prefers wolf-king style roles before ordinary wolves", () => {
   const source = readFileSync(new URL("../src/house-rules.ts", import.meta.url), "utf8");
   const black = source.indexOf("black_wolf_king: 0");

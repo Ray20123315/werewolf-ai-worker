@@ -1,5 +1,13 @@
 export const MAX_ADMIN_TOKENS = 8;
 
+export function parseBoundedIntegerQuery(raw: string | null, fallback: number, min: number, max: number): number {
+  const text = raw?.trim() ?? "";
+  if (!/^-?\d+$/.test(text)) return fallback;
+  const value = Number(text);
+  if (!Number.isSafeInteger(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+}
+
 export function parseAdminTokens(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
   const out: string[] = [];

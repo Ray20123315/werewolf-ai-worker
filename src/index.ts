@@ -1,7 +1,7 @@
 import { GameRoom } from "./room";
 import { installChatChannels } from "./chat-channels";
 export { RoomDirectory } from "./room-directory";
-import { classifyDiagnostic, isAdminRequest, parseAdminTokens, sanitizeDiagnosticMessage } from "./admin";
+import { classifyDiagnostic, isAdminRequest, parseAdminTokens, parseBoundedIntegerQuery, sanitizeDiagnosticMessage } from "./admin";
 import { ROLE_LIST } from "./roles";
 import type { AIConfig } from "./types";
 import { normalizeTranslationLocale, translateTexts, validateTranslationTexts } from "./translate";
@@ -24,7 +24,7 @@ export default {
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
     try {
-      if (url.pathname.startsWith("/api/admin")) return await handleAdmin(request, url, env);
+      if (url.pathname.startsWith("/api/admin")) return await handleAdmin(request, url, env, ctx);
 
       if (request.method === "GET" && url.pathname === "/api/health") {
         return json({
@@ -55,7 +55,7 @@ export default {
           const room = env.GAME_ROOM.getByName(roomId);
           try {
             const result = await room.initialize(roomId, name, playerPassword, roomPassword);
-            await roomDirectory(env).registerRoom(roomId);
+            trackRoom(ctx, env, roomId);
             return json(result, 201);
           } catch (error) {
             if (error instanceof Error && error.message.includes("ROOM_ALREADY_EXISTS")) continue;
@@ -68,11 +68,11 @@ export default {
       const translate = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/translate$/);
       if (translate && request.method === "POST") {
         const roomId = translate[1]!;
-        trackRoom(ctx, env, roomId);
         const body = await readJson(request);
         const room = env.GAME_ROOM.getByName(roomId);
         const token = stringField(body, "token");
         await room.getStateByToken(token);
+        trackRoom(ctx, env, roomId);
         const targetLocale = normalizeTranslationLocale(body.targetLocale);
         if (!targetLocale) throw new Error("targetLocale 無效");
         const sourceLocale = body.sourceLocale === undefined ? undefined : normalizeTranslationLocale(body.sourceLocale);
@@ -83,45 +83,62 @@ export default {
 
       const roomInfo = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/info$/);
       if (roomInfo && request.method === "GET") {
-        trackRoom(ctx, env, roomInfo[1]!);
-        return json(await env.GAME_ROOM.getByName(roomInfo[1]!).roomInfo());
+        const roomId = roomInfo[1]!;
+        const result = await env.GAME_ROOM.getByName(roomId).roomInfo();
+        trackRoom(ctx, env, roomId);
+        return json(result);
       }
 
       const aiRun = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})\/ai\/run$/);
       if (aiRun && request.method === "POST") {
-        trackRoom(ctx, env, aiRun[1]!);
+        const roomId = aiRun[1]!;
         const body = await readJson(request);
         const apiKeys = stringArrayField(body, "apiKeys", 8, 1024, body.apiKey);
-        return json(await env.GAME_ROOM.getByName(aiRun[1]!).runAI(
+        const result = await env.GAME_ROOM.getByName(roomId).runAI(
           stringField(body, "token"), stringField(body, "playerId"), apiKeys
-        ));
+        );
+        trackRoom(ctx, env, roomId);
+        return json(result);
       }
 
       const match = url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{6})(?:\/(join|login|ai|state|ws))?$/);
       if (!match) return json({ error: "Not found" }, 404);
       const roomId = match[1]!;
       const action = match[2] ?? "state";
-      trackRoom(ctx, env, roomId);
       const room = env.GAME_ROOM.getByName(roomId);
 
       if (action === "join" && request.method === "POST") {
         const body = await readJson(request);
-        return json(await room.joinHuman(
+        const result = await room.joinHuman(
           stringField(body, "name"), stringField(body, "playerPassword", 72), optionalStringField(body, "roomPassword", 72)
-        ), 201);
+        );
+        trackRoom(ctx, env, roomId);
+        return json(result, 201);
       }
       if (action === "login" && request.method === "POST") {
         const body = await readJson(request);
-        return json(await room.loginHuman(
+        const result = await room.loginHuman(
           stringField(body, "name"), stringField(body, "playerPassword", 72), optionalStringField(body, "roomPassword", 72)
-        ));
+        );
+        trackRoom(ctx, env, roomId);
+        return json(result);
       }
       if (action === "ai" && request.method === "POST") {
         const body = await readJson(request);
-        return json(await room.addAI(stringField(body, "token"), stringField(body, "name"), parseAIConfig(body)), 201);
+        const result = await room.addAI(stringField(body, "token"), stringField(body, "name"), parseAIConfig(body));
+        trackRoom(ctx, env, roomId);
+        return json(result, 201);
       }
-      if (action === "state" && request.method === "GET") return json(await room.getStateByToken(url.searchParams.get("token") ?? ""));
-      if (action === "ws" && request.method === "GET") return room.fetch(request);
+      if (action === "state" && request.method === "GET") {
+        const result = await room.getStateByToken(url.searchParams.get("token") ?? "");
+        trackRoom(ctx, env, roomId);
+        return json(result);
+      }
+      if (action === "ws" && request.method === "GET") {
+        const response = await room.fetch(request);
+        if (response.status === 101) trackRoom(ctx, env, roomId);
+        return response;
+      }
       return json({ error: "Method not allowed" }, 405);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Internal error";
@@ -141,7 +158,7 @@ export default {
   }
 };
 
-async function handleAdmin(request: Request, url: URL, env: WorkerEnv): Promise<Response> {
+async function handleAdmin(request: Request, url: URL, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
   const tokens = parseAdminTokens(env.ADMIN_PANEL_TOKENS);
   if (!tokens.length) throw new Error("管理後台尚未設定管理員 Token");
   if (!isAdminRequest(request, tokens)) throw new Error("管理員 Token 無效");
@@ -218,23 +235,35 @@ async function handleAdmin(request: Request, url: URL, env: WorkerEnv): Promise<
   if (roomMatch) {
     const roomId = roomMatch[1]!;
     const action = roomMatch[2] ?? "state";
-    await directory.registerRoom(roomId);
     const room = env.GAME_ROOM.getByName(roomId);
-    if (request.method === "GET" && action === "state") return json(await room.adminSnapshot());
+    if (request.method === "GET" && action === "state") {
+      const result = await room.adminSnapshot();
+      trackRoom(ctx, env, roomId);
+      return json(result);
+    }
     if (request.method === "POST" && action === "kick") {
       const body = await readJson(request);
-      await room.adminKick(stringField(body, "playerId", 100));
+      const playerId = stringField(body, "playerId", 100);
+      try {
+        await room.adminKick(playerId);
+      } catch (error) {
+        if (playerId !== "__disband_room__" || !(error instanceof Error) || !error.message.includes("房間不存在")) throw error;
+      }
+      if (playerId === "__disband_room__") await directory.unregisterRoom(roomId, Date.now());
+      else trackRoom(ctx, env, roomId);
       return json({ ok: true });
     }
     if (request.method === "POST" && action === "moderator") {
       const body = await readJson(request);
       if (typeof body.enabled !== "boolean") throw new Error("enabled 必須是 boolean");
       await room.adminSetModerator(stringField(body, "playerId", 100), body.enabled);
+      trackRoom(ctx, env, roomId);
       return json({ ok: true });
     }
     if (request.method === "POST" && action === "notice") {
       const body = await readJson(request);
       await room.adminNotice(stringField(body, "content", 300));
+      trackRoom(ctx, env, roomId);
       return json({ ok: true });
     }
   }
@@ -243,7 +272,10 @@ async function handleAdmin(request: Request, url: URL, env: WorkerEnv): Promise<
 }
 
 function roomDirectory(env: Env) { return env.ROOM_DIRECTORY.getByName("global"); }
-function trackRoom(ctx: ExecutionContext, env: Env, roomId: string): void { ctx.waitUntil(roomDirectory(env).registerRoom(roomId).catch(() => undefined)); }
+function trackRoom(ctx: ExecutionContext, env: Env, roomId: string): void {
+  const seenAt = Date.now();
+  ctx.waitUntil(roomDirectory(env).registerRoom(roomId, seenAt).catch(() => undefined));
+}
 async function recordApplicationError(env: Env, input: { roomId?: string; source: string; category: string; message: string; detail?: string }): Promise<void> {
   await roomDirectory(env).recordError({
     ...(input.roomId ? { roomId: input.roomId } : {}),
@@ -257,6 +289,7 @@ async function recordApplicationError(env: Env, input: { roomId?: string; source
 
 function statusForError(message: string): number {
   if (message.includes("管理後台尚未設定")) return 503;
+  if (message.includes("登入嘗試過多")) return 429;
   if (message.includes("管理員 Token 無效") || message.includes("名稱或人物密碼錯誤")) return 401;
   if (message.includes("不存在")) return 404;
   if (message.includes("憑證") || message.includes("只有房主") || message.includes("房間管理員")) return 403;
@@ -268,7 +301,9 @@ function statusForError(message: string): number {
 function extractRoomId(pathname: string): string | undefined { return pathname.match(/\/rooms\/([A-Z2-9]{6})(?:\/|$)/)?.[1]; }
 function optionalRoomId(value: string | null): string | undefined { if (!value) return undefined; const id = value.trim().toUpperCase(); if (!/^[A-Z2-9]{6}$/.test(id)) throw new Error("房號格式不正確"); return id; }
 function roomIdField(body: JsonObject, key: string): string { const id = stringField(body, key, 6).toUpperCase(); if (!/^[A-Z2-9]{6}$/.test(id)) throw new Error("房號格式不正確"); return id; }
-function integerQuery(url: URL, key: string, fallback: number, min: number, max: number): number { const raw = url.searchParams.get(key); if (!raw) return fallback; const value = Number.parseInt(raw, 10); return Number.isInteger(value) ? Math.max(min, Math.min(max, value)) : fallback; }
+function integerQuery(url: URL, key: string, fallback: number, min: number, max: number): number {
+  return parseBoundedIntegerQuery(url.searchParams.get(key), fallback, min, max);
+}
 function textQuery(url: URL, key: string, maxLength: number): string { return String(url.searchParams.get(key) || "").trim().slice(0, maxLength); }
 function labelQuery(url: URL, key: string): string | undefined { const value = textQuery(url, key, 60); if (!value) return undefined; if (!/^[a-z0-9_.:-]+$/i.test(value)) throw new Error(`${key} 格式不正確`); return value; }
 function roomActivityQuery(value: string | null): "all" | "active" | "stale" { return value === "active" || value === "stale" ? value : "all"; }

@@ -1,4 +1,5 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
+import { assertCurrentAITask, captureAITaskContext } from "./ai-task-freshness.js";
 import { activePlayers, canWitchSelfSave, isVillageCivilian, livingPlayers, playerFaction } from "./game-engine.js";
 import type { ChatMessage, GameState, Player, WitchAction } from "./types.js";
 
@@ -185,6 +186,8 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     const task = this.pendingAITask(state);
     if (!task || task.playerId !== playerId) throw new Error("此 AI 目前沒有待執行操作");
     if (task.operation !== "free_chat" && task.operation !== "wolf_chat") return originalRunAI.call(this, hostToken, playerId, apiKeys);
+    this.assertHost(state, hostToken);
+    const taskContext = captureAITaskContext(state, task);
 
     const actor = state.players.find((p) => p.id === playerId && p.isAI && p.alive && !p.isSpectator);
     if (!actor?.ai) throw new Error("AI 玩家狀態無效");
@@ -200,30 +203,35 @@ export function installHouseRules(GameRoomCtor: { prototype: RoomPrototype }): v
     const parsed = parseJSONObject(result.text) as Record<string, unknown>;
     const fallback = wolfChat ? "我先看前面資訊與身分風險，狼刀建議集中，不要把隊友關係聊得太明顯。" : "我先記這個說法，等等會對照票型和前後矛盾再判斷。";
     const content = typeof parsed.message === "string" && parsed.message.trim() ? this.normalizeChat(parsed.message) : fallback;
-    const message = this.chatMessage(state, actor, content) as RuntimeMessage;
+    const current = this.requireState() as GameState;
+    this.assertHost(current, hostToken);
+    assertCurrentAITask(this, current, taskContext);
+    const nowActor = current.players.find((p) => p.id === playerId && p.isAI && p.alive && !p.isSpectator);
+    if (!nowActor?.ai) throw new Error("AI 玩家狀態無效");
+    const message = this.chatMessage(current, nowActor, content) as RuntimeMessage;
 
-    const system = this.systemMem(state) as Record<string, unknown>;
+    const system = this.systemMem(current) as Record<string, unknown>;
     if (wolfChat) {
-      const audience = [actor.id, ...(this.wolfTeammates(state, actor) as Player[]).map((p) => p.id)];
+      const audience = [nowActor.id, ...(this.wolfTeammates(current, nowActor) as Player[]).map((p) => p.id)];
       if (audience.length < 2) throw new Error("目前沒有可用的狼人秘密聊天室");
       message.channel = "werewolf";
       message.audienceIds = audience;
       const actors = asStringArray(system.aiWolfChatActors);
-      if (!actors.includes(actor.id)) actors.push(actor.id);
+      if (!actors.includes(nowActor.id)) actors.push(nowActor.id);
       system.aiWolfChatActors = actors;
       system.aiWolfChatCount = Number(system.aiWolfChatCount ?? 0) + 1;
     } else {
       delete system.aiFreeChatPlayerId;
       const actors = asStringArray(system.aiFreeChatActors);
-      if (!actors.includes(actor.id)) actors.push(actor.id);
+      if (!actors.includes(nowActor.id)) actors.push(nowActor.id);
       system.aiFreeChatActors = actors;
       system.aiFreeChatCount = Number(system.aiFreeChatCount ?? 0) + 1;
     }
 
-    state.messages.push(message);
-    this.trimMessages(state);
-    this.touchAndSave(state);
-    this.broadcast(state);
+    current.messages.push(message);
+    this.trimMessages(current);
+    this.touchAndSave(current);
+    this.broadcast(current);
     return { ok: true };
   };
 
