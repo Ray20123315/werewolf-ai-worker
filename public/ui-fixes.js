@@ -174,12 +174,14 @@
         button.type = "button";
         button.className = "panel-collapse-button";
         button.dataset.panelCollapse = key;
-        const collapsed = localStorage.getItem(`${COLLAPSE_PREFIX}${key}`) === "1";
+        const storageKey = `${COLLAPSE_PREFIX}${key}`;
+        const stored = localStorage.getItem(storageKey);
+        const collapsed = stored === "1" || (stored === null && key === "host");
         panel.classList.toggle("panel-collapsed", collapsed);
         button.addEventListener("click", () => {
           const next = !panel.classList.contains("panel-collapsed");
           panel.classList.toggle("panel-collapsed", next);
-          localStorage.setItem(`${COLLAPSE_PREFIX}${key}`, next ? "1" : "0");
+          localStorage.setItem(storageKey, next ? "1" : "0");
           syncCollapseButton(button, next);
         });
         heading.append(button);
