@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CORE_REMOVED_ROLE_IDS, activeCoreRoleDefinitions, coreWinner, defaultAllRoleSetup, exactDuplicateCoreSkills, installCoreRules } from "../.test-build/core-rules.js";
+import { migrateCoreState } from "../.test-build/core-state.js";
 import { ABSTAIN_TARGET, createVoteSnapshot } from "../.test-build/equal-vote.js";
 import { installHouseRules } from "../.test-build/house-rules.js";
 import { WORD_ROLE_IDS } from "../.test-build/word-role-allowlist.js";
@@ -56,6 +57,13 @@ test("slaughter-all requires every living non-wolf faction to be gone", () => {
   assert.equal(coreWinner(state), undefined);
   human.alive = false;
   assert.equal(coreWinner(state), "werewolf");
+});
+
+test("core settings migration clamps CP group size to at least two", () => {
+  const state = baseState([player("a", "villager")]);
+  state.settings.loverGroupSize = 1;
+  migrateCoreState(state);
+  assert.equal(state.settings.loverGroupSize, 2);
 });
 
 test("vote snapshot freezes equal counts while separating abstain and role-invalid ballots", () => {
@@ -130,4 +138,15 @@ test("browser core controls expose fool, group Cupid, timer, hunter last words a
   assert.match(source, /__abstain__/);
   assert.match(source, /link_lovers/);
   assert.match(index, /<script src="\/core-rules\.js"><\/script>/);
+});
+
+test("browser core settings preserve local drafts until the submitted snapshot is confirmed", () => {
+  const source = readFileSync(new URL("../public/core-rules.js", import.meta.url), "utf8");
+  assert.match(source, /id="coreLoverGroupSize" name="loverGroupSize" type="number" min="2" max="50"/);
+  assert.match(source, /dataset\.coreDirty/);
+  assert.match(source, /dataset\.corePending/);
+  assert.match(source, /snapshotCoreSettingsForSubmit/);
+  assert.match(source, /setTimeout\(\(\) => sendCoreSettings\(settings\), 0\)/);
+  assert.doesNotMatch(source, /setTimeout\(sendCoreSettings, 0\)/);
+  assert.match(source, /clampIntegerValue\(document\.querySelector\("#coreLoverGroupSize"\)\?\.value, 2, 50, 2\)/);
 });

@@ -49,6 +49,7 @@
   let applying = false;
   let observer = null;
   const OBSERVER_OPTIONS = { childList: true, subtree: true };
+  const CORE_SETTING_IDS = ["coreFoolEnabled", "coreLoverGroupSize", "coreDayMinutes", "coreNightMinutes"];
 
   const locale = () => {
     const value = localStorage.getItem("werewolf-locale");
@@ -142,28 +143,92 @@
     grid.className = "core-settings-grid";
     grid.dataset.noTranslate = "";
     grid.innerHTML = `
-      <label class="check-row core-fool-row"><input id="coreFoolEnabled" type="checkbox" /><span data-core-label="fool"></span></label>
-      <label><span data-core-label="loverSize"></span><input id="coreLoverGroupSize" type="number" min="2" max="50" step="1" value="2" /></label>
-      <label><span data-core-label="dayMinutes"></span><input id="coreDayMinutes" type="number" min="0.25" max="60" step="0.25" value="2" /></label>
-      <label><span data-core-label="nightMinutes"></span><input id="coreNightMinutes" type="number" min="0.25" max="60" step="0.25" value="2" /></label>`;
+      <label class="check-row core-fool-row"><input id="coreFoolEnabled" name="foolEnabled" type="checkbox" /><span data-core-label="fool"></span></label>
+      <label><span data-core-label="loverSize"></span><input id="coreLoverGroupSize" name="loverGroupSize" type="number" min="2" max="50" step="1" value="2" /></label>
+      <label><span data-core-label="dayMinutes"></span><input id="coreDayMinutes" name="dayDurationMinutes" type="number" min="0.25" max="60" step="0.25" value="2" /></label>
+      <label><span data-core-label="nightMinutes"></span><input id="coreNightMinutes" name="nightDurationMinutes" type="number" min="0.25" max="60" step="0.25" value="2" /></label>`;
     form.insertBefore(grid, form.querySelector('button[type="submit"]'));
-    form.addEventListener("submit", () => setTimeout(sendCoreSettings, 0));
+    grid.addEventListener("input", markCoreSettingDirty);
+    grid.addEventListener("change", (event) => {
+      markCoreSettingDirty(event);
+      if (event.target?.id === "coreLoverGroupSize") normalizeCoreSettingInputs();
+    });
+    form.addEventListener("submit", snapshotCoreSettingsForSubmit, { capture: true });
   }
 
-  function sendCoreSettings() {
+  function markCoreSettingDirty(event) {
+    const target = event.target;
+    if (!target || !CORE_SETTING_IDS.includes(target.id)) return;
+    target.dataset.coreDirty = "1";
+    delete target.dataset.corePending;
+  }
+
+  function snapshotCoreSettingsForSubmit() {
     if (!latestState?.me?.isHost || latestState.phase !== "lobby") return;
+    normalizeCoreSettingInputs();
+    const settings = readCoreSettings();
+    for (const id of CORE_SETTING_IDS) {
+      const control = document.querySelector(`#${id}`);
+      if (!control) continue;
+      control.dataset.coreDirty = "1";
+      control.dataset.corePending = "1";
+    }
+    setTimeout(() => sendCoreSettings(settings), 0);
+  }
+
+  function readCoreSettings() {
     const day = Number(document.querySelector("#coreDayMinutes")?.value || 2);
     const night = Number(document.querySelector("#coreNightMinutes")?.value || 2);
-    const command = {
-      type: "configure_settings",
-      settings: {
-        foolEnabled: Boolean(document.querySelector("#coreFoolEnabled")?.checked),
-        loverGroupSize: Number.parseInt(document.querySelector("#coreLoverGroupSize")?.value || "2", 10),
-        dayDurationSeconds: Math.round(day * 60),
-        nightDurationSeconds: Math.round(night * 60)
-      }
+    return {
+      foolEnabled: Boolean(document.querySelector("#coreFoolEnabled")?.checked),
+      loverGroupSize: clampIntegerValue(document.querySelector("#coreLoverGroupSize")?.value, 2, 50, 2),
+      dayDurationSeconds: Math.round(clampNumberValue(day, 0.25, 60, 2) * 60),
+      nightDurationSeconds: Math.round(clampNumberValue(night, 0.25, 60, 2) * 60)
     };
+  }
+
+  function normalizeCoreSettingInputs() {
+    const size = document.querySelector("#coreLoverGroupSize");
+    const day = document.querySelector("#coreDayMinutes");
+    const night = document.querySelector("#coreNightMinutes");
+    if (size) size.value = String(clampIntegerValue(size.value, 2, 50, Number(latestState?.settings?.loverGroupSize || 2)));
+    if (day) day.value = formatMinutes(clampNumberValue(day.value, 0.25, 60, Number(latestState?.settings?.dayDurationSeconds || 120) / 60));
+    if (night) night.value = formatMinutes(clampNumberValue(night.value, 0.25, 60, Number(latestState?.settings?.nightDurationSeconds || 120) / 60));
+  }
+
+  function clampIntegerValue(value, min, max, fallback) {
+    const parsed = Number.parseInt(String(value ?? ""), 10);
+    if (!Number.isFinite(parsed)) return Math.max(min, Math.min(max, Math.floor(fallback)));
+    return Math.max(min, Math.min(max, Math.floor(parsed)));
+  }
+
+  function clampNumberValue(value, min, max, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return Math.max(min, Math.min(max, Number(fallback) || min));
+    return Math.max(min, Math.min(max, parsed));
+  }
+
+  function formatMinutes(value) {
+    return Number(value).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  }
+
+  function sendCoreSettings(settings) {
+    if (!latestState?.me?.isHost || latestState.phase !== "lobby") return;
+    const command = { type: "configure_settings", settings };
     if (!send(command)) setTimeout(() => send(command), 250);
+  }
+
+  function syncCoreControl(control, serverValue) {
+    if (!control) return;
+    const isCheckbox = control.type === "checkbox";
+    const matches = isCheckbox ? control.checked === Boolean(serverValue) : control.value === String(serverValue);
+    if (control.dataset.coreDirty === "1") {
+      if (control.dataset.corePending !== "1" || !matches) return;
+      delete control.dataset.coreDirty;
+      delete control.dataset.corePending;
+    }
+    if (isCheckbox) control.checked = Boolean(serverValue);
+    else control.value = String(serverValue);
   }
 
   function syncSettings() {
@@ -175,10 +240,10 @@
     const size = document.querySelector("#coreLoverGroupSize");
     const day = document.querySelector("#coreDayMinutes");
     const night = document.querySelector("#coreNightMinutes");
-    if (fool) fool.checked = Boolean(settings.foolEnabled);
-    if (size) size.value = String(settings.loverGroupSize || 2);
-    if (day) day.value = String((Number(settings.dayDurationSeconds || 120) / 60).toFixed(2).replace(/\.00$/, ""));
-    if (night) night.value = String((Number(settings.nightDurationSeconds || 120) / 60).toFixed(2).replace(/\.00$/, ""));
+    syncCoreControl(fool, Boolean(settings.foolEnabled));
+    syncCoreControl(size, String(clampIntegerValue(settings.loverGroupSize, 2, 50, 2)));
+    syncCoreControl(day, formatMinutes(Number(settings.dayDurationSeconds || 120) / 60));
+    syncCoreControl(night, formatMinutes(Number(settings.nightDurationSeconds || 120) / 60));
     const disabled = latestState.phase !== "lobby" || !latestState.me?.isHost;
     [fool, size, day, night].forEach((el) => { if (el) el.disabled = disabled; });
 
