@@ -260,8 +260,10 @@
 
   #game .host-card { overflow: auto; }
   #game .action-area { min-height: 0; overflow: auto; padding-right: 3px; }
-  #game .messages { flex: 1 1 auto; min-height: 0; max-height: none; gap: 7px; }
-  #game .players { flex: 1 1 auto; min-height: 0; max-height: none; gap: 6px; }
+  #game .messages { flex: 1 1 auto; min-height: 0; max-height: none; }
+  #game .players { flex: 1 1 auto; min-height: 0; max-height: none; }
+  #game .messages { gap: 7px; }
+  #game .players { gap: 6px; }
   #game .section-heading { flex: 0 0 auto; }
   #game .compact-heading { margin-bottom: 10px; }
   #game .chat-form { flex: 0 0 auto; padding-top: 10px; }
