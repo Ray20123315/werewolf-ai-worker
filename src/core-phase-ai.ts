@@ -208,7 +208,8 @@ function clearPhaseDeadline(room: any, state: GameState): void {
   const system = room.systemMem(state) as Record<string, unknown>;
   delete system.phaseDeadlineAt;
   delete system.phaseDeadlineKind;
-  void room.ctx?.storage?.deleteAlarm?.();
+  if (typeof room.rescheduleRoomAlarm === "function") room.rescheduleRoomAlarm(state);
+  else void room.ctx?.storage?.deleteAlarm?.();
 }
 
 function forcePassNight(room: any, state: GameState): void {

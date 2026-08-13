@@ -251,7 +251,7 @@ export function applyWinnerMetadata(state: GameState): void {
 
 function restoreDefaultRolePool(room: any): void {
   const state = room.requireState() as RuntimeState;
-  if (state.phase !== "lobby") return;
+  if (state.phase !== "lobby" || state.coreDefaultRolePoolV1 !== true) return;
   state.roleSetup = defaultAllRoleSetup();
   state.coreDefaultRolePoolV1 = true;
   room.touchAndSave(state);

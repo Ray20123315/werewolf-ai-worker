@@ -1,7 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import { callAIWithKeys, parseJSONObject } from "./ai";
 import { assertCurrentAITask, captureAITaskContext } from "./ai-task-freshness.js";
-import { createPasswordVerifier, normalizePlayerName, verifyPassword } from "./auth";
+import {
+  assertFreshRoomCommit,
+  captureHumanSessionCommitContext,
+  captureRoomCommitContext,
+  resolveFreshHumanJoin,
+  resolveFreshHumanSession
+} from "./auth-task-freshness.js";
+import { createPasswordVerifier, normalizePlayerName, verifyLoginPassword, verifyPassword } from "./auth";
 import {
   activePlayers,
   areNightActionsComplete,
@@ -89,10 +96,14 @@ export class GameRoom extends DurableObject<Env> {
   async initialize(roomId: string, hostName: string, hostPassword: string, roomPassword?: string): Promise<InitResult> {
     if (this.loadState()) throw new Error("ROOM_ALREADY_EXISTS");
     const host = await this.newHumanPlayer(hostName, hostPassword, false);
+    const roomPasswordVerifier = roomPassword?.trim()
+      ? await createPasswordVerifier(roomPassword, "房間密碼")
+      : undefined;
+    if (this.loadState()) throw new Error("ROOM_ALREADY_EXISTS");
     const now = Date.now();
     const state: GameState = {
       roomId,
-      ...(roomPassword?.trim() ? { roomPassword: await createPasswordVerifier(roomPassword, "房間密碼") } : {}),
+      ...(roomPasswordVerifier ? { roomPassword: roomPasswordVerifier } : {}),
       hostPlayerId: host.id,
       phase: "lobby",
       round: 0,
@@ -173,36 +184,47 @@ export class GameRoom extends DurableObject<Env> {
 
   async joinHuman(name: string, password: string, roomPassword?: string): Promise<JoinResult> {
     const state = this.requireState();
+    const commitContext = captureRoomCommitContext(state);
     await this.assertRoomPassword(state, roomPassword);
+    assertFreshRoomCommit(this.requireState(), commitContext);
     const normalized = normalizePlayerName(name);
     if (state.players.some((p) => !p.kickedAt && p.nameKey === normalized.key)) throw new Error("這個玩家名稱已被使用，請登入原有人物或改用其他名稱");
-    const spectator = state.phase !== "lobby";
-    const player = await this.newHumanPlayer(normalized.display, password, spectator);
-    state.players.push(player);
-    if (!spectator) state.roleSetup = state.settings.autoRoleSetup
-      ? defaultRoleSetup(activePlayers(state.players).filter((p) => !p.kickedAt).length)
-      : growRoleSetup(state.roleSetup);
-    this.addSystemMessage(state, spectator ? `${player.name} 以觀戰者身份重新加入；下一局可成為正式玩家。` : `${player.name} 加入房間。`);
-    this.touchAndSave(state);
-    this.broadcast(state);
+    const player = await this.newHumanPlayer(normalized.display, password, false);
+    const current = this.requireState();
+    const spectator = resolveFreshHumanJoin(current, commitContext, normalized.key);
+    player.isSpectator = spectator;
+    player.alive = !spectator;
+    current.players.push(player);
+    if (!spectator) current.roleSetup = current.settings.autoRoleSetup
+      ? defaultRoleSetup(activePlayers(current.players).filter((p) => !p.kickedAt).length)
+      : growRoleSetup(current.roleSetup);
+    this.addSystemMessage(current, spectator ? `${player.name} 以觀戰者身份重新加入；下一局可成為正式玩家。` : `${player.name} 加入房間。`);
+    this.touchAndSave(current);
+    this.broadcast(current);
     return { playerId: player.id, token: player.token, spectator };
   }
 
   async loginHuman(name: string, password: string, roomPassword?: string): Promise<JoinResult> {
     const state = this.requireState();
+    const roomContext = captureRoomCommitContext(state);
     await this.assertRoomPassword(state, roomPassword);
+    assertFreshRoomCommit(this.requireState(), roomContext);
     const normalized = normalizePlayerName(name);
     this.assertLoginAllowed(normalized.key);
     const player = state.players.find((p) => !p.isAI && !p.kickedAt && p.nameKey === normalized.key);
-    if (!player?.password || !(await verifyPassword(password, player.password))) {
+    const sessionContext = player ? captureHumanSessionCommitContext(state, player) : undefined;
+    const passwordMatches = await verifyLoginPassword(password, player?.password);
+    if (!passwordMatches || !sessionContext) {
       this.recordLoginFailure(normalized.key);
       throw new Error("玩家名稱或人物密碼錯誤");
     }
+    const current = this.requireState();
+    const currentPlayer = resolveFreshHumanSession(current, sessionContext);
     this.authFailures.delete(normalized.key);
-    player.token = randomToken();
-    this.closePlayerSockets(player.id, 4001, "Session rotated");
-    this.touchAndSave(state);
-    return { playerId: player.id, token: player.token, spectator: player.isSpectator };
+    currentPlayer.token = randomToken();
+    this.closePlayerSockets(currentPlayer.id, 4001, "Session rotated");
+    this.touchAndSave(current);
+    return { playerId: currentPlayer.id, token: currentPlayer.token, spectator: currentPlayer.isSpectator };
   }
 
   async addAI(hostToken: string, name: string, ai: AIConfig): Promise<{ playerId: string }> {
@@ -356,9 +378,13 @@ export class GameRoom extends DurableObject<Env> {
     const player = this.playerByToken(state, token);
     if (player.isAI) throw new Error("AI 玩家不使用人物密碼");
     if (player.password) throw new Error("人物密碼已設定；目前不提供免驗證改密碼");
-    player.password = await createPasswordVerifier(password);
-    this.addSystemMessage(state, `${player.name} 已完成舊房間人物密碼升級。`);
-    this.saveBroadcast(state);
+    const sessionContext = captureHumanSessionCommitContext(state, player);
+    const verifier = await createPasswordVerifier(password);
+    const current = this.requireState();
+    const currentPlayer = resolveFreshHumanSession(current, sessionContext);
+    currentPlayer.password = verifier;
+    this.addSystemMessage(current, `${currentPlayer.name} 已完成舊房間人物密碼升級。`);
+    this.saveBroadcast(current);
   }
 
   private startGame(token: string): void {

@@ -75,6 +75,10 @@ export function installPost28FullRepairRules(GameRoomCtor: { prototype: RoomProt
   const originalAlarm = proto.alarm;
   const originalSaveBroadcast = proto.saveBroadcast;
 
+  proto.rescheduleRoomAlarm = function (state: GameState): void {
+    scheduleNextAlarm(this, state);
+  };
+
   if (typeof originalRequireState === "function") {
     proto.requireState = function (): GameState {
       const state = originalRequireState.call(this) as GameState;
@@ -1149,6 +1153,10 @@ function augmentWinningAllegiance(room: any, state: GameState, winner: string): 
 }
 
 function armEmptyRoomCleanup(room: any, state: GameState): void {
+  if (openSocketCount(room) > 0) {
+    clearEmptyRoomCleanup(room, state);
+    return;
+  }
   const system = room.systemMem(state) as Record<string, any>;
   system.roomEmptyDisposeAt = Date.now() + EMPTY_ROOM_GRACE_MS;
   room.touchAndSave(state);
@@ -1171,9 +1179,10 @@ function emptyCleanupExpired(room: any, state: GameState): boolean {
 function scheduleNextAlarm(room: any, state: GameState): void {
   const system = room.systemMem(state) as Record<string, any>;
   const phase = typeof system.phaseDeadlineAt === "number" ? system.phaseDeadlineAt : undefined;
-  const empty = typeof system.roomEmptyDisposeAt === "number" ? system.roomEmptyDisposeAt : undefined;
+  const empty = openSocketCount(room) === 0 && typeof system.roomEmptyDisposeAt === "number" ? system.roomEmptyDisposeAt : undefined;
   const next = [phase, empty].filter((value): value is number => typeof value === "number" && Number.isFinite(value)).sort((a, b) => a - b)[0];
   if (next) void room.ctx?.storage?.setAlarm?.(next);
+  else void room.ctx?.storage?.deleteAlarm?.();
 }
 
 function openSocketCount(room: any): number {
@@ -1188,13 +1197,15 @@ function safeState(room: any): GameState | undefined {
 
 async function disbandRoom(room: any, reason: string): Promise<void> {
   const state = safeState(room);
-  const roomId = state?.roomId;
+  if (!state) throw new Error("房間不存在");
+  const roomId = state.roomId;
+  const removedAt = Date.now();
   for (const socket of typeof room.ctx?.getWebSockets === "function" ? room.ctx.getWebSockets() : []) {
     try { socket.close(4000, reason); } catch { /* best effort */ }
   }
   if (typeof room.ctx?.storage?.deleteAll === "function") await room.ctx.storage.deleteAll();
   room.stateCache = undefined;
-  if (roomId && room.env?.ROOM_DIRECTORY) {
-    await room.env.ROOM_DIRECTORY.getByName("global").unregisterRoom(roomId);
+  if (room.env?.ROOM_DIRECTORY) {
+    await room.env.ROOM_DIRECTORY.getByName("global").unregisterRoom(roomId, removedAt);
   }
 }

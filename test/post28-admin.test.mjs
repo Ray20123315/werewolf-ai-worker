@@ -87,6 +87,26 @@ test("manual admin disband deletes Durable Object state and unregisters room dir
   assert.deepEqual(room.unregistered, [st.roomId]);
 });
 
+test("manual admin disband rejects a missing room instead of creating a ghost directory entry", async () => {
+  class Room extends Base() {
+    constructor() {
+      super();
+      this.deleted = 0;
+      this.ctx = {
+        storage: { deleteAll: async () => { this.deleted += 1; }, setAlarm() {} },
+        getWebSockets: () => []
+      };
+    }
+    requireState() { throw new Error("房間不存在"); }
+    async adminKick() { this.baseKick = true; }
+  }
+  install(Room);
+  const room = new Room();
+  await assert.rejects(room.adminKick("__disband_room__"), /房間不存在/);
+  assert.equal(room.deleted, 0);
+  assert.equal(room.baseKick, undefined);
+});
+
 test("expired empty-room cleanup alarm disbands only when no WebSocket remains", async () => {
   class Room extends Base() {
     constructor(st, sockets = []) {
@@ -95,8 +115,14 @@ test("expired empty-room cleanup alarm disbands only when no WebSocket remains",
       this.sockets = sockets;
       this.deleted = 0;
       this.unregistered = [];
+      this.alarmTimes = [];
+      this.deletedAlarms = 0;
       this.ctx = {
-        storage: { deleteAll: async () => { this.deleted += 1; }, setAlarm() {} },
+        storage: {
+          deleteAll: async () => { this.deleted += 1; },
+          setAlarm: (time) => { this.alarmTimes.push(time); },
+          deleteAlarm: () => { this.deletedAlarms += 1; }
+        },
         getWebSockets: () => this.sockets
       };
       this.env = { ROOM_DIRECTORY: { getByName: () => ({ unregisterRoom: async (id) => this.unregistered.push(id) }) } };
@@ -120,6 +146,31 @@ test("expired empty-room cleanup alarm disbands only when no WebSocket remains",
   await connected.alarm();
   assert.equal(connected.deleted, 0);
   assert.equal(connected.baseAlarm, true);
+  assert.deepEqual(connected.alarmTimes, []);
+  assert.equal(connected.deletedAlarms, 1);
+});
+
+test("join and login wrappers do not arm empty-room cleanup while another socket is open", async () => {
+  class Room extends Base() {
+    constructor(st) {
+      super();
+      this.current = st;
+      this.ctx = {
+        storage: { setAlarm() {}, deleteAlarm() {} },
+        getWebSockets: () => [{ readyState: 1 }]
+      };
+    }
+    requireState() { return this.current; }
+    async joinHuman() { return { playerId: "b", token: "t-b", spectator: false }; }
+    async loginHuman() { return { playerId: "a", token: "t-a", spectator: false }; }
+  }
+  install(Room);
+  const st = state([player("a", "villager")], "lobby");
+  const room = new Room(st);
+  await room.joinHuman("B", "1234");
+  assert.equal(st.roleMemory.__system?.roomEmptyDisposeAt, undefined);
+  await room.loginHuman("A", "1234");
+  assert.equal(st.roleMemory.__system?.roomEmptyDisposeAt, undefined);
 });
 
 test("admin page has page-level vertical scroll, omniscient role decoration and disband control", () => {
@@ -135,10 +186,14 @@ test("admin page has page-level vertical scroll, omniscient role decoration and 
   assert.match(html, /admin-full-repair\.js/);
 });
 
-test("RoomDirectory supports hard unregister for empty/disbanded rooms", () => {
+test("RoomDirectory supports hard unregister and blocks stale heartbeats from reviving rooms", () => {
   const source = fs.readFileSync("src/room-directory.ts", "utf8");
-  assert.match(source, /async unregisterRoom\(roomId: string\)/);
+  assert.match(source, /CREATE TABLE IF NOT EXISTS room_tombstones/);
+  assert.match(source, /async unregisterRoom\(roomId: string, removedAt = Date\.now\(\)\)/);
   assert.match(source, /DELETE FROM rooms WHERE room_id = \?/);
+  assert.match(source, /removed_at >= \?/);
+  assert.match(source, /MAX\(rooms\.last_seen_at, excluded\.last_seen_at\)/);
+  assert.match(source, /MAX\(room_tombstones\.removed_at, excluded\.removed_at\)/);
 });
 
 test("ordinary public state path does not receive admin omniscient player projection", () => {

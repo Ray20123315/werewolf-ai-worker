@@ -46,6 +46,7 @@ interface CoreRuntimeRoom {
   checkAndMaybeEnd(state: GameState): void;
   projectState(state: GameState, token: string): unknown;
   pendingAITask(state: GameState): PendingAITask | undefined;
+  rescheduleRoomAlarm?(state: GameState): void;
   alarm(): Promise<void>;
   __auditReactionReconciling?: boolean;
   __auditPreparedNightActions?: Map<string, PreparedNightAction>;
@@ -491,5 +492,6 @@ function clearPhaseDeadline(room: CoreRuntimeRoom, state: GameState): void {
   delete system.phaseDeadlineAt;
   delete system.phaseDeadlineKind;
   delete system.phaseDeadlinePersistedAt;
-  void room.ctx?.storage?.deleteAlarm?.();
+  if (typeof room.rescheduleRoomAlarm === "function") room.rescheduleRoomAlarm(state);
+  else void room.ctx?.storage?.deleteAlarm?.();
 }

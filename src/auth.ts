@@ -3,9 +3,18 @@ import type { PasswordVerifier } from "./types";
 const PBKDF2_MAX_ITERATIONS = 100_000;
 const PBKDF2_ITERATIONS = PBKDF2_MAX_ITERATIONS;
 const PASSWORD_BYTES = 32;
+const DUMMY_PASSWORD_VERIFIER: PasswordVerifier = {
+  salt: "00".repeat(16),
+  hash: "00".repeat(PASSWORD_BYTES),
+  iterations: PBKDF2_ITERATIONS
+};
 
 export function normalizePlayerName(raw: string): { display: string; key: string } {
-  const display = raw.normalize("NFKC").trim().replace(/\s+/g, " ").slice(0, 24);
+  const normalized = raw.normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (/\p{Cs}/u.test(normalized) || /[\u0000-\u001f\u007f-\u009f\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/i.test(normalized)) {
+    throw new Error("玩家名稱不能包含不可見控制字元");
+  }
+  const display = truncateByGrapheme(normalized, 24);
   if (!display) throw new Error("玩家名稱不能為空白");
   const key = display.toLocaleLowerCase("zh-Hant-TW");
   return { display, key };
@@ -33,6 +42,11 @@ export async function verifyPassword(raw: string, verifier: PasswordVerifier): P
   const expected = hexToBytes(verifier.hash);
   const actual = await derive(password, salt, verifier.iterations);
   return timingSafeEqual(actual, expected);
+}
+
+export async function verifyLoginPassword(raw: string, verifier: PasswordVerifier | undefined): Promise<boolean> {
+  const matches = await verifyPassword(raw, verifier ?? DUMMY_PASSWORD_VERIFIER);
+  return Boolean(verifier) && matches;
 }
 
 async function derive(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
@@ -63,4 +77,14 @@ function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i += 1) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return out;
+}
+
+function truncateByGrapheme(value: string, maxCodeUnits: number): string {
+  if (value.length <= maxCodeUnits) return value;
+  let result = "";
+  for (const { segment } of new Intl.Segmenter("zh-Hant-TW", { granularity: "grapheme" }).segment(value)) {
+    if (result.length + segment.length > maxCodeUnits) break;
+    result += segment;
+  }
+  return result || Array.from(value)[0] || "";
 }

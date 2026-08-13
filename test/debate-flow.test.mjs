@@ -72,6 +72,18 @@ test("sequential debate clears the shared day deadline and projects a paused tim
   assert.equal(view.phaseTimerPaused, true);
 });
 
+test("debate deadline cleanup delegates to the combined room-alarm scheduler when installed", () => {
+  const state = stateFor("debate");
+  const room = new FakeRoom(state);
+  room.rescheduled = 0;
+  room.rescheduleRoomAlarm = () => { room.rescheduled += 1; };
+  room.saveBroadcast(state);
+
+  assert.equal(room.rescheduled, 1);
+  assert.equal(room.deletedAlarms, 0);
+  assert.equal(state.roleMemory.__system.phaseDeadlineAt, undefined);
+});
+
 test("vote receives and keeps a fresh full day deadline after debate completes", () => {
   const state = stateFor("debate");
   const room = new FakeRoom(state);

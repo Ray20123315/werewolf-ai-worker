@@ -70,6 +70,7 @@ export class RoomDirectory extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS rooms (room_id TEXT PRIMARY KEY, first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL)`);
+    this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS room_tombstones (room_id TEXT PRIMARY KEY, removed_at INTEGER NOT NULL)`);
     this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS errors (id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT, source TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, detail TEXT, created_at INTEGER NOT NULL)`);
     this.ctx.storage.sql.exec(`CREATE INDEX IF NOT EXISTS idx_errors_created_at ON errors(created_at DESC)`);
     this.ctx.storage.sql.exec(`CREATE INDEX IF NOT EXISTS idx_errors_room_id ON errors(room_id, created_at DESC)`);
@@ -80,14 +81,23 @@ export class RoomDirectory extends DurableObject<Env> {
     const id = normalizeRoomId(roomId);
     const time = finiteTime(seenAt);
     this.ctx.storage.sql.exec(
-      `INSERT INTO rooms (room_id, first_seen_at, last_seen_at) VALUES (?, ?, ?)
-       ON CONFLICT(room_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
-      id, time, time
+      `INSERT INTO rooms (room_id, first_seen_at, last_seen_at)
+       SELECT ?, ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM room_tombstones WHERE room_id = ? AND removed_at >= ?)
+       ON CONFLICT(room_id) DO UPDATE SET last_seen_at = MAX(rooms.last_seen_at, excluded.last_seen_at)`,
+      id, time, time, id, time
     );
   }
 
-  async unregisterRoom(roomId: string): Promise<void> {
-    this.ctx.storage.sql.exec("DELETE FROM rooms WHERE room_id = ?", normalizeRoomId(roomId));
+  async unregisterRoom(roomId: string, removedAt = Date.now()): Promise<void> {
+    const id = normalizeRoomId(roomId);
+    const time = finiteTime(removedAt);
+    this.ctx.storage.sql.exec("DELETE FROM rooms WHERE room_id = ?", id);
+    this.ctx.storage.sql.exec(
+      `INSERT INTO room_tombstones (room_id, removed_at) VALUES (?, ?)
+       ON CONFLICT(room_id) DO UPDATE SET removed_at = MAX(room_tombstones.removed_at, excluded.removed_at)`,
+      id, time
+    );
   }
 
   async listRooms(limit = 100, offset = 0, search = "", activity: RoomActivityFilter = "all", activeSince = 0): Promise<RoomDirectoryEntry[]> {

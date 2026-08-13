@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CORE_REMOVED_ROLE_IDS, activeCoreRoleDefinitions, coreWinner, defaultAllRoleSetup, exactDuplicateCoreSkills, installCoreRules } from "../.test-build/core-rules.js";
+import { installCoreStateRules } from "../.test-build/core-state.js";
 import { ABSTAIN_TARGET, createVoteSnapshot } from "../.test-build/equal-vote.js";
 import { installHouseRules } from "../.test-build/house-rules.js";
 import { WORD_ROLE_IDS } from "../.test-build/word-role-allowlist.js";
@@ -36,6 +37,35 @@ test("Gold Water is absent from the canonical product role surface", () => {
 
 test("active core role pool has no exact duplicate same-faction skill signatures", () => {
   assert.deepEqual(exactDuplicateCoreSkills(), []);
+});
+
+test("a delayed join wrapper cannot overwrite a newer manual role configuration", async () => {
+  let releaseJoin;
+  const joinGate = new Promise((resolve) => { releaseJoin = resolve; });
+  class RaceRoom {
+    constructor(value) { this.state = value; }
+    requireState() { return this.state; }
+    async joinHuman() { await joinGate; return { playerId: "new", token: "token", spectator: false }; }
+    touchAndSave() {}
+    broadcast() {}
+  }
+  installCoreStateRules(RaceRoom);
+
+  const value = baseState([player("host", "villager")]);
+  value.phase = "lobby";
+  value.coreDefaultRolePoolV1 = true;
+  value.roleSetup = defaultAllRoleSetup();
+  const room = new RaceRoom(value);
+  const pending = room.joinHuman("new", "1234");
+  await Promise.resolve();
+
+  value.roleSetup = { werewolf: 1, villager: 1 };
+  value.coreDefaultRolePoolV1 = false;
+  releaseJoin();
+  await pending;
+
+  assert.deepEqual(value.roleSetup, { werewolf: 1, villager: 1 });
+  assert.equal(value.coreDefaultRolePoolV1, false);
 });
 
 test("slaughter-edge only gives wolves the requested one-human edge when no spirit remains", () => {
