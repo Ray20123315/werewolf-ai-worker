@@ -1,4 +1,6 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
+import { assertCurrentAITask, captureAITaskContext } from "./ai-task-freshness.js";
+import type { AITaskContext } from "./ai-task-freshness.js";
 import {
   activePlayers,
   areNightActionsComplete,
@@ -120,6 +122,7 @@ export function installAIFlowRules(GameRoomCtor: { prototype: RoomPrototype }): 
     this.assertHost(before, hostToken);
     const task = this.pendingAITask(before) as RuntimeAITask | undefined;
     if (!task || task.playerId !== playerId) throw new Error("此 AI 目前沒有待執行操作");
+    const taskContext = captureAITaskContext(before, task);
     const actor = before.players.find((player) => player.id === playerId && player.isAI && !player.isSpectator);
     if (!actor?.ai) throw new Error("AI 玩家狀態無效");
 
@@ -131,7 +134,7 @@ export function installAIFlowRules(GameRoomCtor: { prototype: RoomPrototype }): 
       }
       const targetId = await this.decideAITarget(before, actor, apiKeys, candidates);
       const state = this.requireState() as GameState;
-      assertCurrentTask(this, state, playerId, "sheriff_vote");
+      assertCurrentTask(this, state, taskContext);
       const current = state.players.find((player) => player.id === playerId)!;
       this.castSheriffVote(current.token, targetId);
       return { ok: true };
@@ -150,14 +153,14 @@ export function installAIFlowRules(GameRoomCtor: { prototype: RoomPrototype }): 
       }
       const targetIds = await chooseTargetIds(this, before, actor, apiKeys, prompt, candidates);
       const state = this.requireState() as GameState;
-      assertCurrentTask(this, state, playerId, "reaction_action");
+      assertCurrentTask(this, state, taskContext);
       const current = state.players.find((player) => player.id === playerId)!;
       this.submitRoleActionInternal(state, current, prompt.effect, targetIds, prompt.options?.[0]);
       return { ok: true };
     }
 
     if (stateIsCoreNightTask(before, actor, task.operation)) {
-      return runCoreNightAI(this, before, actor, hostToken, task.operation, apiKeys);
+      return runCoreNightAI(this, before, actor, hostToken, taskContext, apiKeys);
     }
 
     return originalRunAI.call(this, hostToken, playerId, apiKeys);
@@ -168,13 +171,13 @@ function stateIsCoreNightTask(state: GameState, actor: Player, operation: string
   return state.phase === "night" && (operation === "night_action" || operation === "role_action") && ["seer", "guard", "witch"].includes(actor.role ?? "");
 }
 
-async function runCoreNightAI(room: any, before: GameState, actor: Player, hostToken: string, operation: string, apiKeys: string[]): Promise<{ ok: true }> {
+async function runCoreNightAI(room: any, before: GameState, actor: Player, hostToken: string, taskContext: AITaskContext, apiKeys: string[]): Promise<{ ok: true }> {
   if (actor.role === "seer") {
     const candidates = livingPlayers(before.players).filter((player) => player.id !== actor.id);
     if (!candidates.length) return skipCurrentNightRequirement(room, before, actor);
     const targetId = await room.decideAITarget(before, actor, apiKeys, candidates);
     const state = room.requireState() as GameState;
-    assertCurrentTask(room, state, actor.id, operation);
+    assertCurrentTask(room, state, taskContext);
     state.nightActions.seerTargets[actor.id] = targetId;
     room.afterNightSubmission(state);
     return { ok: true };
@@ -185,7 +188,7 @@ async function runCoreNightAI(room: any, before: GameState, actor: Player, hostT
     if (!candidates.length) return skipCurrentNightRequirement(room, before, actor);
     const targetId = await room.decideAITarget(before, actor, apiKeys, candidates);
     const state = room.requireState() as GameState;
-    assertCurrentTask(room, state, actor.id, operation);
+    assertCurrentTask(room, state, taskContext);
     state.nightActions.guardTargets[actor.id] = targetId;
     room.afterNightSubmission(state);
     return { ok: true };
@@ -210,7 +213,7 @@ async function runCoreNightAI(room: any, before: GameState, actor: Player, hostT
       if (target) action = { type: "poison", targetId: target.id };
     }
     const state = room.requireState() as GameState;
-    assertCurrentTask(room, state, actor.id, operation);
+    assertCurrentTask(room, state, taskContext);
     const current = state.players.find((player) => player.id === actor.id)!;
     room.validateWitchAction(state, current, action);
     state.nightActions.witchActions[current.id] = action;
@@ -338,9 +341,8 @@ function sheriffVoteCandidates(state: GameState): Player[] {
   return livingPlayers(state.players).filter((player) => state.sheriff.candidates.includes(player.id));
 }
 
-function assertCurrentTask(room: any, state: GameState, playerId: string, operation: string): void {
-  const task = room.pendingAITask(state) as RuntimeAITask | undefined;
-  if (!task || task.playerId !== playerId || task.operation !== operation) throw new Error("AI 操作已過期，請重新同步房間狀態");
+function assertCurrentTask(room: any, state: GameState, context: AITaskContext): void {
+  assertCurrentAITask(room, state, context);
 }
 
 function autoSkipNoTargetAIVotes(state: GameState): boolean {

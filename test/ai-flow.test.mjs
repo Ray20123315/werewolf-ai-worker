@@ -141,6 +141,25 @@ test("AI seer uses the dedicated seer submission map instead of looping on gener
   assert.equal(room.originalAIRuns, 0);
 });
 
+test("a delayed AI response cannot mutate a replacement night with the same visible task", async () => {
+  const seer = player("seer", "seer", true);
+  const target = player("target", "villager");
+  const value = state([seer, target]);
+  const room = new FakeRoom(value);
+
+  room.decideAITarget = async () => {
+    room.state = state([seer, target]);
+    return target.id;
+  };
+
+  await assert.rejects(
+    room.runAI("host-token", seer.id, ["key"]),
+    /AI 操作已過期/
+  );
+  assert.deepEqual(room.state.nightActions.seerTargets, {});
+  assert.equal(room.afterNight, 0);
+});
+
 test("AI sheriff election vote is an automatic pending task", async () => {
   const bot = player("bot", "villager", true);
   const human = player("human", "villager");
@@ -175,4 +194,19 @@ test("AI flow implementation covers core night roles, sheriff votes, reactions, 
   assert.match(source, /operation: "reaction_action"/);
   assert.match(source, /AUTO_SKIP_TARGET/);
   assert.match(source, /stripNightAutoSkips/);
+});
+
+test("every model-backed AI state mutator revalidates its captured task context", () => {
+  for (const relative of [
+    "../src/room.ts",
+    "../src/house-rules.ts",
+    "../src/ai-flow.ts",
+    "../src/core-phase-ai.ts",
+    "../src/core-integrity.ts",
+    "../src/core-post28-repair.ts"
+  ]) {
+    const source = readFileSync(new URL(relative, import.meta.url), "utf8");
+    assert.match(source, /captureAITaskContext/, relative);
+    assert.match(source, /(?:assertCurrentAITask|isCurrentAITask)/, relative);
+  }
 });

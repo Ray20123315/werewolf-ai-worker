@@ -116,6 +116,24 @@ test("AI council skips a hidden wolf before returning a visible all-AI cohort", 
   assert.ok(["a", "b"].includes(task?.playerId));
 });
 
+test("post-28 AI wolf council keeps the host authorization gate", async () => {
+  class Room extends MemoryBase() {
+    constructor(st) { super(); this.current = st; this.originalAIRuns = 0; }
+    requireState() { return this.current; }
+    pendingAITask() { return { playerId: "a", operation: "core_wolf_council" }; }
+    async runAI() { this.originalAIRuns += 1; return { ok: true }; }
+    wolfTeammates(st, actor) { return st.players.filter((candidate) => candidate.id !== actor.id && candidate.role === "werewolf"); }
+    assertHost() { throw new Error("host only"); }
+  }
+  install(Room);
+  const ai = { isAI: true, ai: { provider: "openai", model: "x" } };
+  const st = state([player("a", "werewolf", ai), player("b", "werewolf", ai), player("v", "villager")]);
+  const room = new Room(st);
+
+  await assert.rejects(room.runAI("not-host", "a", ["key"]), /host only/);
+  assert.equal(room.originalAIRuns, 0);
+});
+
 test("Cupid, Gambler and Guardian first-night actions do not reappear on round 2", () => {
   for (const [role, effect] of [["cupid", "link_lovers"], ["gambler", "choose_allegiance"], ["guardian", "set_permanent_guard"]]) {
     class Room extends MemoryBase() {

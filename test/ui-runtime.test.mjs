@@ -156,12 +156,15 @@ test("private inspection results render beside players without widening the publ
   const channels = source("../src/chat-channels.ts");
 
   assert.match(inspection, /function refreshPrivateInspections\(\)/);
-  assert.match(inspection, /\/state\?token=\$\{encodeURIComponent\(session\.token\)\}/);
+  assert.match(inspection, /\/state\?token=\$\{encodeURIComponent\(context\.token\)\}/);
   assert.match(inspection, /inspectionView\?\.me\?\.seerResults\?\.\[player\.id\]/);
   assert.match(inspection, /inspectionView\?\.me\?\.roleResults \|\| \{\}/);
   assert.match(inspection, /pill private-inspection/);
   assert.match(inspection, /function factionInspectionLabel/);
   assert.match(inspection, /function identityResultLabel/);
+  assert.match(inspection, /inspectionAbortController\?\.abort\(\)/);
+  assert.match(inspection, /current\?\.key !== context\.key/);
+  assert.match(inspection, /context\.key !== inspectionViewContextKey/);
   assert.match(inspection, /"zh-TW"/);
   assert.match(inspection, /"zh-CN"/);
   assert.match(inspection, /en:/);

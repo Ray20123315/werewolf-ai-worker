@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { callAIWithKeys, parseJSONObject } from "./ai";
+import { assertCurrentAITask, captureAITaskContext } from "./ai-task-freshness.js";
 import { createPasswordVerifier, normalizePlayerName, verifyPassword } from "./auth";
 import {
   activePlayers,
@@ -227,6 +228,7 @@ export class GameRoom extends DurableObject<Env> {
     this.assertHost(before, hostToken);
     const task = this.pendingAITask(before);
     if (!task || task.playerId !== playerId) throw new Error("此 AI 目前沒有待執行操作");
+    const taskContext = captureAITaskContext(before, task);
     const actor = before.players.find((p) => p.id === playerId && p.isAI && p.alive && !p.isSpectator);
     if (!actor?.role || !actor.ai) throw new Error("AI 玩家狀態無效");
 
@@ -234,6 +236,7 @@ export class GameRoom extends DurableObject<Env> {
       const decision = await this.decideAIDebateTurn(before, actor, apiKeys);
       const state = this.requireState();
       this.assertFreshAITask(state, hostToken, playerId, "debate_speech");
+      assertCurrentAITask(this, state, taskContext);
       const current = state.players.find((p) => p.id === playerId)!;
       const dayAction = this.normalizeAIDayAction(state, current, decision.action);
       this.recordDebateSpeech(state, current, decision.message, "zh-TW");
@@ -249,31 +252,44 @@ export class GameRoom extends DurableObject<Env> {
       const targetId = await this.decideAIVote(before, actor, apiKeys);
       const state = this.requireState();
       this.assertFreshAITask(state, hostToken, playerId, "vote");
+      assertCurrentAITask(this, state, taskContext);
       this.castVoteById(state, playerId, targetId);
       return { ok: true };
     }
 
+    if (this.participatesWolfVote(before, actor) && !before.nightActions.wolfVotes[actor.id]) {
+      const targetId = await this.decideAITarget(before, actor, apiKeys, this.legalWolfTargets(before, actor));
+      const state = this.requireState();
+      this.assertFreshAITask(state, hostToken, playerId, task.operation);
+      assertCurrentAITask(this, state, taskContext);
+      const current = state.players.find((p) => p.id === playerId && p.isAI && p.alive && !p.isSpectator);
+      if (!current?.role || !current.ai) throw new Error("AI 玩家狀態無效");
+      this.applyNightAction(state, current, { kind: "werewolf", targetId });
+      this.afterNightSubmission(state);
+      return { ok: true };
+    }
+
+    const prompt = roleActionPrompt(actor, before);
+    if (!prompt) throw new Error("AI 沒有可執行的角色技能");
+    const targets = this.legalTargets(before, actor, prompt.targetMode);
+    const targetIds: string[] = [];
+    if (targets.length) {
+      const first = await this.decideAITarget(before, actor, apiKeys, targets);
+      targetIds.push(first);
+      if (String(prompt.targetMode).startsWith("two_")) {
+        const second = targets.find((p) => p.id !== first);
+        if (second) targetIds.push(second.id);
+      }
+    }
     const state = this.requireState();
     this.assertFreshAITask(state, hostToken, playerId, task.operation);
-    const current = state.players.find((p) => p.id === playerId)!;
-    if (this.participatesWolfVote(state, current) && !state.nightActions.wolfVotes[current.id]) {
-      const targetId = await this.decideAITarget(before, actor, apiKeys, this.legalWolfTargets(before, actor));
-      this.applyNightAction(state, current, { kind: "werewolf", targetId });
-    } else {
-      const prompt = roleActionPrompt(current, state);
-      if (!prompt) throw new Error("AI 沒有可執行的角色技能");
-      const targets = this.legalTargets(state, current, prompt.targetMode);
-      const targetIds: string[] = [];
-      if (targets.length) {
-        const first = await this.decideAITarget(before, actor, apiKeys, targets);
-        targetIds.push(first);
-        if (String(prompt.targetMode).startsWith("two_")) {
-          const second = targets.find((p) => p.id !== first);
-          if (second) targetIds.push(second.id);
-        }
-      }
-      this.submitRoleActionInternal(state, current, prompt.effect, targetIds, prompt.options?.[0]);
+    assertCurrentAITask(this, state, taskContext);
+    const current = state.players.find((p) => p.id === playerId && p.isAI && p.alive && !p.isSpectator);
+    const currentPrompt = current ? roleActionPrompt(current, state) : undefined;
+    if (!current?.role || !current.ai || !currentPrompt || currentPrompt.effect !== prompt.effect || currentPrompt.targetMode !== prompt.targetMode) {
+      throw new Error("AI 操作已過期，請重新同步房間狀態");
     }
+    this.submitRoleActionInternal(state, current, currentPrompt.effect, targetIds, currentPrompt.options?.[0]);
     this.afterNightSubmission(state);
     return { ok: true };
   }

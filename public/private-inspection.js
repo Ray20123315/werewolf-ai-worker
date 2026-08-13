@@ -11,7 +11,9 @@
 
   let inspectionTimer = null;
   let inspectionRequestSeq = 0;
+  let inspectionAbortController = null;
   let inspectionView = null;
+  let inspectionViewContextKey = "";
   let roleLabels = new Map();
   let roleNames = new Set();
 
@@ -51,28 +53,54 @@
   }
 
   function scheduleInspectionRefresh(delay = 40) {
+    clearStaleInspectionView();
     clearTimeout(inspectionTimer);
     inspectionTimer = setTimeout(refreshPrivateInspections, delay);
   }
 
   async function refreshPrivateInspections() {
-    const code = roomCode();
-    const session = roomSession(code);
-    if (!code || !session?.token || !players.children.length) return;
+    const context = inspectionContext();
+    if (!context) {
+      clearInspectionView();
+      return;
+    }
     const seq = ++inspectionRequestSeq;
+    inspectionAbortController?.abort();
+    const controller = new AbortController();
+    inspectionAbortController = controller;
     try {
       const [stateResponse] = await Promise.all([
-        fetch(`/api/rooms/${code}/state?token=${encodeURIComponent(session.token)}`, { cache: "no-store" }),
+        fetch(`/api/rooms/${context.code}/state?token=${encodeURIComponent(context.token)}`, { cache: "no-store", signal: controller.signal }),
         ensureRoleLabels()
       ]);
       if (!stateResponse.ok) return;
       const next = await stateResponse.json();
-      if (seq !== inspectionRequestSeq || !next?.me || !Array.isArray(next.players)) return;
+      const current = inspectionContext();
+      if (seq !== inspectionRequestSeq || controller.signal.aborted || current?.key !== context.key || !next?.me || !Array.isArray(next.players)) return;
       inspectionView = next;
+      inspectionViewContextKey = context.key;
       renderInspectionBadges();
-    } catch {
+    } catch (error) {
+      if (error?.name === "AbortError") return;
       // Private decoration is optional and must never block the room UI.
+    } finally {
+      if (inspectionAbortController === controller) inspectionAbortController = null;
     }
+  }
+
+  function clearStaleInspectionView() {
+    const context = inspectionContext();
+    if (context && (!inspectionViewContextKey || context.key === inspectionViewContextKey)) return;
+    clearInspectionView();
+  }
+
+  function clearInspectionView() {
+    inspectionRequestSeq += 1;
+    inspectionAbortController?.abort();
+    inspectionAbortController = null;
+    inspectionView = null;
+    inspectionViewContextKey = "";
+    renderInspectionBadges();
   }
 
   async function ensureRoleLabels() {
@@ -91,7 +119,8 @@
 
   function renderInspectionBadges() {
     players.querySelectorAll(".pill.private-inspection").forEach((node) => node.remove());
-    if (!inspectionView?.me || !Array.isArray(inspectionView.players)) return;
+    const context = inspectionContext();
+    if (!context || context.key !== inspectionViewContextKey || !inspectionView?.me || !Array.isArray(inspectionView.players)) return;
 
     const rowsByName = new Map(
       [...players.querySelectorAll(":scope > .player-row")].map((row) => [playerName(row), row])
@@ -175,5 +204,13 @@
     } catch {
       return null;
     }
+  }
+
+  function inspectionContext() {
+    const code = roomCode();
+    const session = roomSession(code);
+    const token = typeof session?.token === "string" ? session.token : "";
+    if (!code || !token || !players.children.length) return null;
+    return { code, token, key: `${code}\u0000${token}` };
   }
 })();

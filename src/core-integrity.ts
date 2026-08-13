@@ -1,4 +1,6 @@
 import { callAIWithKeys, parseJSONObject } from "./ai.js";
+import { assertCurrentAITask, captureAITaskContext } from "./ai-task-freshness.js";
+import type { AITaskContext } from "./ai-task-freshness.js";
 import { areNightActionsComplete, livingPlayers, playerFaction, roleActionPrompt } from "./game-engine.js";
 import type { GameState, Player, RoleActionPrompt, RoleActionSubmission } from "./types.js";
 
@@ -230,11 +232,12 @@ export function installCoreIntegrityRules(GameRoomCtor: { prototype: RoomPrototy
       this.assertHost(before, hostToken);
       const task = this.pendingAITask(before) as RuntimeAITask | undefined;
       if (!task || task.playerId !== playerId) throw new Error("此 AI 目前沒有待執行操作");
+      const taskContext = captureAITaskContext(before, task);
       const actor = before.players.find((player) => player.id === playerId && player.isAI && player.alive && !player.isSpectator && player.ai);
       if (!actor?.ai || !["role_action", "reaction_action"].includes(task.operation)) return originalRunAI.call(this, hostToken, playerId, apiKeys);
       const rawPrompt = roleActionPrompt(actor, before);
       if (!rawPrompt || !rawPrompt.options?.length || !coreActionAvailable(before, actor, rawPrompt)) return originalRunAI.call(this, hostToken, playerId, apiKeys);
-      return runStructuredOptionAI(this, before, actor, task, apiKeys);
+      return runStructuredOptionAI(this, before, actor, taskContext, apiKeys);
     };
   }
 }
@@ -587,7 +590,7 @@ function endDraw(room: any, state: GameState, label: string): boolean {
   return true;
 }
 
-async function runStructuredOptionAI(room: any, before: GameState, actor: Player, task: RuntimeAITask, apiKeys: string[]): Promise<{ ok: true }> {
+async function runStructuredOptionAI(room: any, before: GameState, actor: Player, taskContext: AITaskContext, apiKeys: string[]): Promise<{ ok: true }> {
   const prompt = roleActionPrompt(actor, before)!;
   const options = coreActionOptions(before, actor, prompt);
   if (!options.length) throw new Error("此 AI 目前沒有合法技能選項");
@@ -609,8 +612,7 @@ async function runStructuredOptionAI(room: any, before: GameState, actor: Player
     catch { targetIds = fallbackTargets(before, actor, prompt, selectedOption, legalTargets); }
   }
   const state = room.requireState() as GameState;
-  const fresh = room.pendingAITask(state) as RuntimeAITask | undefined;
-  if (!fresh || fresh.playerId !== actor.id || fresh.operation !== task.operation) throw new Error("AI 操作已過期，請重新同步房間狀態");
+  assertCurrentAITask(room, state, taskContext);
   const current = state.players.find((player) => player.id === actor.id && player.alive && !player.isSpectator && !player.kickedAt);
   if (!current) throw new Error("AI 玩家狀態無效");
   room.submitRoleActionInternal(state, current, prompt.effect, targetIds, selectedOption);
